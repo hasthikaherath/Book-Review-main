@@ -368,6 +368,7 @@ export default function App() {
   // Interactive Social Comments & Book Club Notes State
   const [commentInputs, setCommentInputs] = useState({});
   const [readerSearchQuery, setReaderSearchQuery] = useState('');
+  const [readerDirectoryTab, setReaderDirectoryTab] = useState('all'); // 'all' | 'following' | 'others'
   const [noteTargetUserId, setNoteTargetUserId] = useState('usr-3');
   const [noteBookId, setNoteBookId] = useState('bk-2');
   const [noteMessage, setNoteMessage] = useState('');
@@ -384,6 +385,28 @@ export default function App() {
       return uName.includes(q) || dName.includes(q) || bio.includes(q);
     });
   }, [users, readerSearchQuery]);
+
+  // Separation of Readers: Following vs Other Community Readers
+  const { followingReaders, otherReaders } = useMemo(() => {
+    const following = [];
+    const others = [];
+    const followingIds = new Set((currentUser?.following || []).map(String));
+
+    filteredReaders.forEach((reader) => {
+      const rId = String(reader.id || reader._id);
+      const isMe = Boolean(
+        currentUser &&
+          (String(currentUser.id) === rId || String(currentUser._id) === rId)
+      );
+      if (followingIds.has(rId)) {
+        following.push(reader);
+      } else if (!isMe) {
+        others.push(reader);
+      }
+    });
+
+    return { followingReaders: following, otherReaders: others };
+  }, [filteredReaders, currentUser]);
 
   // Keep recommendation note targets synced with available users/books
   useEffect(() => {
@@ -2346,6 +2369,52 @@ export default function App() {
                   </span>
                 </div>
 
+                {/* Filter Tabs: Separate Ones I Follow from Others */}
+                <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-950/90 border border-white/10 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setReaderDirectoryTab('all')}
+                    className={`py-1.5 px-2 rounded-lg font-medium transition-all text-center flex items-center justify-center gap-1.5 ${
+                      readerDirectoryTab === 'all'
+                        ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <span>All</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${readerDirectoryTab === 'all' ? 'bg-black/20 text-slate-950' : 'bg-white/10 text-slate-300'}`}>
+                      {filteredReaders.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReaderDirectoryTab('following')}
+                    className={`py-1.5 px-2 rounded-lg font-medium transition-all text-center flex items-center justify-center gap-1.5 ${
+                      readerDirectoryTab === 'following'
+                        ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <span>Following</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${readerDirectoryTab === 'following' ? 'bg-black/20 text-slate-950' : 'bg-white/10 text-slate-300'}`}>
+                      {followingReaders.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReaderDirectoryTab('others')}
+                    className={`py-1.5 px-2 rounded-lg font-medium transition-all text-center flex items-center justify-center gap-1.5 ${
+                      readerDirectoryTab === 'others'
+                        ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <span>Discover</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${readerDirectoryTab === 'others' ? 'bg-black/20 text-slate-950' : 'bg-white/10 text-slate-300'}`}>
+                      {otherReaders.length}
+                    </span>
+                  </button>
+                </div>
+
                 {/* Search for Readers by @username or Display Name */}
                 <div className="relative">
                   <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -2369,16 +2438,10 @@ export default function App() {
                 </div>
 
                 <div className="space-y-3">
-                  {filteredReaders.length === 0 ? (
-                    <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-1.5">
-                      <p className="text-xs text-slate-300 font-semibold">No readers found</p>
-                      <p className="text-[11px] text-slate-500">
-                        No fellow reader matching "{readerSearchQuery}". Try another username or clear the search.
-                      </p>
-                    </div>
-                  ) : (
-                    filteredReaders.map((reader) => {
+                  {(() => {
+                    const renderReaderCard = (reader) => {
                       if (!reader) return null;
+                      const readerId = reader.id || reader._id;
                       const isMe = Boolean(
                         currentUser &&
                           (currentUser.id === reader.id ||
@@ -2387,7 +2450,7 @@ export default function App() {
                             currentUser._id === reader._id)
                       );
                       const isFollowing = (currentUser?.following || []).some(
-                        (fId) => String(fId) === String(reader.id || reader._id)
+                        (fId) => String(fId) === String(readerId)
                       );
                       const isInspected = Boolean(
                         inspectedUser &&
@@ -2398,17 +2461,19 @@ export default function App() {
                       );
                       const readerDiaryCount = diaryEntries.filter(
                         (d) =>
-                          String(d.userId) === String(reader.id || reader._id) &&
+                          String(d.userId) === String(readerId) &&
                           d.status === 'read'
                       ).length;
 
                       return (
                         <div
-                          key={reader.id || reader._id}
-                          onClick={() => setInspectedUserId(reader.id || reader._id)}
+                          key={readerId}
+                          onClick={() => setInspectedUserId(readerId)}
                           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
                             isInspected
                               ? 'bg-amber-500/10 border-amber-400/50 shadow-[0_0_25px_rgba(245,158,11,0.12)]'
+                              : isFollowing
+                              ? 'bg-emerald-500/[0.04] border-emerald-400/30 hover:border-emerald-400/60'
                               : 'bg-white/[0.02] border-white/[0.07] hover:border-white/20'
                           }`}
                         >
@@ -2416,13 +2481,18 @@ export default function App() {
                             <div className="flex items-center gap-3">
                               <HumanAvatar user={reader} size="md" />
                               <div>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="text-sm font-bold text-white">
                                     {reader.displayName || reader.username || 'Reader'}
                                   </span>
                                   {isMe && (
                                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
                                       YOU
+                                    </span>
+                                  )}
+                                  {isFollowing && !isMe && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                                      FOLLOWING
                                     </span>
                                   )}
                                 </div>
@@ -2438,11 +2508,11 @@ export default function App() {
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleToggleFollow(reader.id || reader._id);
+                                  handleToggleFollow(readerId);
                                 }}
                                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                                   isFollowing
-                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 hover:bg-rose-500/20 hover:text-rose-300'
                                     : 'bg-amber-400 text-slate-950 hover:bg-amber-300'
                                 }`}
                               >
@@ -2471,8 +2541,100 @@ export default function App() {
                           </div>
                         </div>
                       );
-                    })
-                  )}
+                    };
+
+                    if (filteredReaders.length === 0) {
+                      return (
+                        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-1.5">
+                          <p className="text-xs text-slate-300 font-semibold">No readers found</p>
+                          <p className="text-[11px] text-slate-500">
+                            No fellow reader matching "{readerSearchQuery}". Try another username or clear the search.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    if (readerDirectoryTab === 'following') {
+                      if (followingReaders.length === 0) {
+                        return (
+                          <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-2">
+                            <p className="text-xs text-slate-300 font-semibold">No followed readers yet</p>
+                            <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                              You haven't followed any readers yet. Switch to "Discover" and click "+ Follow" to stay in sync with friends!
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setReaderDirectoryTab('others')}
+                              className="px-3.5 py-1.5 rounded-xl bg-amber-400 text-slate-950 font-bold text-xs hover:bg-amber-300 transition-all inline-block mt-1"
+                            >
+                              Discover Readers
+                            </button>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="space-y-3">
+                          {followingReaders.map(renderReaderCard)}
+                        </div>
+                      );
+                    }
+
+                    if (readerDirectoryTab === 'others') {
+                      if (otherReaders.length === 0) {
+                        return (
+                          <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-1.5">
+                            <p className="text-xs text-slate-300 font-semibold">No other readers to discover</p>
+                            <p className="text-[11px] text-slate-500">
+                              You are already following all fellow readers in the network!
+                            </p>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="space-y-3">
+                          {otherReaders.map(renderReaderCard)}
+                        </div>
+                      );
+                    }
+
+                    // readerDirectoryTab === 'all': Group into separated sections
+                    return (
+                      <div className="space-y-5">
+                        {/* Readers You Follow Section */}
+                        {followingReaders.length > 0 && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between px-1">
+                              <span className="text-xs font-mono uppercase tracking-wider text-emerald-400 font-semibold flex items-center gap-1.5">
+                                <Sparkles size={13} className="text-emerald-400" /> Readers You Follow ({followingReaders.length})
+                              </span>
+                            </div>
+                            <div className="space-y-3">
+                              {followingReaders.map(renderReaderCard)}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Discover Other Readers Section */}
+                        {otherReaders.length > 0 && (
+                          <div className="space-y-3 pt-1">
+                            <div className="flex items-center justify-between px-1 border-t border-white/10 pt-3">
+                              <span className="text-xs font-mono uppercase tracking-wider text-amber-300 font-semibold flex items-center gap-1.5">
+                                <Users size={13} className="text-amber-300" /> Discover Other Readers ({otherReaders.length})
+                              </span>
+                            </div>
+                            <div className="space-y-3">
+                              {otherReaders.map(renderReaderCard)}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Current User Card if in results */}
+                        {filteredReaders
+                          .filter((r) => currentUser && (r.id === currentUser.id || r._id === currentUser.id || r.id === currentUser._id || r._id === currentUser._id))
+                          .map(renderReaderCard)}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -2605,13 +2767,26 @@ export default function App() {
                       {(users || []).filter((u) => u && (u.id !== currentUser?.id && u._id !== currentUser?._id)).length === 0 ? (
                         <option value="">No other readers registered yet</option>
                       ) : (
-                        (users || [])
-                          .filter((u) => u && (u.id !== currentUser?.id && u._id !== currentUser?._id))
-                          .map((u) => (
-                            <option key={u.id || u._id} value={u.id || u._id}>
-                              @{u.username || 'reader'} ({u.displayName || u.username || 'Reader'})
-                            </option>
-                          ))
+                        <>
+                          {followingReaders.length > 0 && (
+                            <optgroup label="── Readers You Follow ──">
+                              {followingReaders.map((u) => (
+                                <option key={u.id || u._id} value={u.id || u._id}>
+                                  @{u.username || 'reader'} ({u.displayName || u.username || 'Reader'}) ★
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherReaders.length > 0 && (
+                            <optgroup label="── Other Readers ──">
+                              {otherReaders.map((u) => (
+                                <option key={u.id || u._id} value={u.id || u._id}>
+                                  @{u.username || 'reader'} ({u.displayName || u.username || 'Reader'})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </>
                       )}
                     </select>
                   </div>

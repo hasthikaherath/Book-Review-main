@@ -329,31 +329,6 @@ export default function BookDetailModal({
                   <Calendar size={14} />
                   <span>+ Log to Reading Diary</span>
                 </button>
-
-                {/* Task 3.1: Logged-in Edit Book and Delete Book Buttons */}
-                {currentUser && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onEditBook && onEditBook(selectedBook)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40 text-xs font-semibold transition-all"
-                      title="Edit book details (Title, author, year, genres, description)"
-                    >
-                      <Edit3 size={14} />
-                      <span>Edit Book</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleDeleteBookClick}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-semibold transition-all"
-                      title="Delete book and cascade-delete all its reviews"
-                    >
-                      <Trash2 size={14} />
-                      <span>Delete Book</span>
-                    </button>
-                  </>
-                )}
               </div>
             </div>
           </div>
