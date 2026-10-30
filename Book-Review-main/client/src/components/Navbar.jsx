@@ -5,8 +5,6 @@ import {
   Calendar,
   Users,
   Bookmark,
-  Database,
-  RefreshCw,
   Layers,
   Plus,
   User,
@@ -74,7 +72,6 @@ export default function Navbar({
             { id: 'diary', label: 'Reading Diary', icon: Calendar },
             { id: 'social', label: 'Readers & Feed', icon: Users },
             { id: 'vault', label: 'My Vault', icon: Bookmark },
-            { id: 'mern', label: 'MERN Stack', icon: Database },
           ].map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -96,36 +93,8 @@ export default function Navbar({
           })}
         </nav>
 
-        {/* Right User Auth, Database Status, 3D Toggle & Quick Diary Action */}
+        {/* Right User Auth, 3D Toggle & Quick Diary Action */}
         <div className="flex items-center gap-2">
-          {/* Live MongoDB Connection Badge */}
-          <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 bg-white/[0.03] backdrop-blur-md text-xs">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                dbStatus.connected
-                  ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
-                  : 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
-              } animate-pulse shrink-0`}
-            />
-            <span className="font-mono text-slate-300">
-              {dbStatus.connected ? 'MongoDB Live' : 'Local Cache'}
-            </span>
-            {apiLatency !== null && (
-              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                {apiLatency}ms
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => syncWithDatabase && syncWithDatabase(false)}
-              disabled={isSyncing}
-              className="text-slate-400 hover:text-white transition-colors ml-0.5"
-              title="Force sync data with MongoDB"
-            >
-              <RefreshCw size={12} className={isSyncing ? 'animate-spin text-amber-400' : ''} />
-            </button>
-          </div>
-
           <button
             type="button"
             onClick={() => setEnable3DBooks && setEnable3DBooks((prev) => !prev)}
@@ -139,48 +108,6 @@ export default function Navbar({
             <Layers size={13} />
             <span>3D Covers</span>
           </button>
-
-          {/* Ambience Quick Mood Switcher */}
-          {setAmbienceMood && (
-            <div className="hidden md:flex items-center gap-1 p-1 rounded-xl bg-white/[0.04] border border-white/10 text-xs">
-              {[
-                { id: 'cozy', label: '☕', name: 'Candlelit Study' },
-                { id: 'velvet', label: '🌙', name: 'Midnight Velvet' },
-                { id: 'starlight', label: '✨', name: 'Starlight Atrium' }
-              ].map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => {
-                    setAmbienceMood(m.id);
-                    try {
-                      localStorage.setItem('aether_ambience_mood', m.id);
-                      const bgMap = {
-                        cozy: '#1F140C',
-                        velvet: '#180D2C',
-                        starlight: '#0A1C36'
-                      };
-                      const c = bgMap[m.id] || '#1F140C';
-                      document.body.style.backgroundColor = c;
-                      document.documentElement.style.backgroundColor = c;
-                    } catch (e) {}
-                  }}
-                  className={`px-2 py-1 rounded-lg transition-all text-xs ${
-                    ambienceMood === m.id
-                      ? m.id === 'cozy'
-                        ? 'bg-amber-500 text-slate-950 font-bold shadow-[0_0_12px_rgba(245,158,11,0.6)]'
-                        : m.id === 'velvet'
-                        ? 'bg-purple-500 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.6)]'
-                        : 'bg-sky-400 text-slate-950 font-bold shadow-[0_0_12px_rgba(56,189,248,0.6)]'
-                      : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
-                  }`}
-                  title={`Switch Ambience: ${m.name}`}
-                >
-                  <span>{m.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
 
           <button
             type="button"
@@ -236,4 +163,3 @@ export default function Navbar({
     </header>
   );
 }
-
