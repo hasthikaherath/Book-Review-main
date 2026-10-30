@@ -12,9 +12,10 @@
   }
 
   body {
-    background-color: #08070D;
+    background-color: #1F140C;
     color: #F1F5F9;
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    transition: background-color 0.5s ease;
   }
 
   /* Custom scrollbar */
@@ -80,16 +81,20 @@
 
 /* Ambient glow background spots */
 .ambient-glow-amber {
-  background: radial-gradient(circle 500px at 50% 10%, rgba(245, 158, 11, 0.12), transparent 70%);
+  background: radial-gradient(circle 900px at 50% 5%, rgba(245, 158, 11, 0.35), transparent 70%),
+              radial-gradient(circle 700px at 90% 50%, rgba(234, 88, 12, 0.28), transparent 65%),
+              radial-gradient(circle 700px at 10% 75%, rgba(180, 83, 9, 0.25), transparent 65%);
 }
 
 .ambient-glow-velvet {
-  background: radial-gradient(circle 600px at 50% 10%, rgba(139, 92, 246, 0.14), transparent 70%),
-              radial-gradient(circle 400px at 80% 60%, rgba(244, 63, 94, 0.09), transparent 60%);
+  background: radial-gradient(circle 900px at 50% 5%, rgba(168, 85, 247, 0.38), transparent 70%),
+              radial-gradient(circle 700px at 90% 50%, rgba(217, 70, 239, 0.30), transparent 65%),
+              radial-gradient(circle 700px at 10% 75%, rgba(99, 102, 241, 0.30), transparent 65%);
 }
 
 .ambient-glow-starlight {
-  background: radial-gradient(circle 600px at 50% 10%, rgba(56, 189, 248, 0.14), transparent 70%),
-              radial-gradient(circle 500px at 20% 70%, rgba(45, 212, 191, 0.08), transparent 60%);
+  background: radial-gradient(circle 900px at 50% 5%, rgba(56, 189, 248, 0.38), transparent 70%),
+              radial-gradient(circle 700px at 90% 50%, rgba(6, 182, 212, 0.30), transparent 65%),
+              radial-gradient(circle 700px at 10% 75%, rgba(59, 130, 246, 0.30), transparent 65%);
 }
 

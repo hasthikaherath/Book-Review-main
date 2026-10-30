@@ -178,33 +178,92 @@ router.get('/google-books', async (req, res) => {
 // POST /api/books - Create a custom book in MongoDB
 router.post('/', auth, async (req, res) => {
   try {
-    const { title, author, year, publishedYear, pages, pageCount, isbn, genres, cover, coverUrl, synopsis, description } = req.body;
-    if (!title || !title.trim() || !author || !author.trim()) {
+    const {
+      title,
+      author,
+      year,
+      publishedYear,
+      publicationYear,
+      pages,
+      pageCount,
+      isbn,
+      genres,
+      cover,
+      coverImage,
+      coverUrl,
+      synopsis,
+      description,
+    } = req.body;
+
+    if (!title || !String(title).trim() || !author || !String(author).trim()) {
       return res.status(400).json({ message: 'Title and author are required and cannot be empty' });
     }
 
-    const yearVal = year !== undefined ? Number(year) : (publishedYear !== undefined ? Number(publishedYear) : new Date().getFullYear());
+    const rawYear =
+      year !== undefined && year !== ''
+        ? year
+        : publicationYear !== undefined && publicationYear !== ''
+        ? publicationYear
+        : publishedYear;
+
+    const yearVal = rawYear !== undefined && rawYear !== '' ? Number(rawYear) : new Date().getFullYear();
     if (isNaN(yearVal) || yearVal <= 0) {
       return res.status(400).json({ message: 'Publication year must be a valid positive number' });
     }
 
-    const pagesVal = pages !== undefined ? Number(pages) : (pageCount !== undefined ? Number(pageCount) : 300);
+    const rawPages =
+      pages !== undefined && pages !== ''
+        ? pages
+        : pageCount !== undefined && pageCount !== ''
+        ? pageCount
+        : 320;
+
+    const pagesVal = Number(rawPages);
     if (isNaN(pagesVal) || pagesVal <= 0) {
       return res.status(400).json({ message: 'Page count must be a valid positive number' });
     }
 
+    let genresArray = ['Literature'];
+    if (Array.isArray(genres) && genres.length > 0) {
+      genresArray = genres.map((g) => String(g).trim()).filter(Boolean);
+    } else if (typeof genres === 'string' && genres.trim()) {
+      genresArray = genres.split(',').map((g) => g.trim()).filter(Boolean);
+    }
+    if (genresArray.length === 0) {
+      genresArray = ['Literature'];
+    }
+
+    const finalCover = cover || coverImage || coverUrl || '';
+    const finalDescription = synopsis !== undefined ? synopsis : (description || '');
+
     const book = await Book.create({
-      externalId: `CUST-${Date.now()}`,
-      isbn: isbn || `978-00000${Math.floor(1000 + Math.random() * 9000)}`,
-      title: title.trim(),
-      author: author.trim(),
+      externalId: req.body.externalId || `CUST-${Date.now()}`,
+      isbn: isbn || req.body.isbn || `978-00000${Math.floor(1000 + Math.random() * 9000)}`,
+      title: String(title).trim(),
+      author: String(author).trim(),
       publishedYear: yearVal,
       pageCount: pagesVal,
-      genres: Array.isArray(genres) && genres.length > 0 ? genres : (genres ? [genres] : ['Literature']),
-      coverUrl: cover || coverUrl || '',
-      description: synopsis !== undefined ? synopsis : (description || ''),
+      genres: genresArray,
+      coverUrl: finalCover,
+      description: finalDescription,
     });
-    res.status(201).json(book);
+
+    const result = book.toJSON ? book.toJSON() : book;
+    res.status(201).json({
+      ...result,
+      id: String(book._id),
+      _id: book._id,
+      publishedYear: yearVal,
+      publicationYear: yearVal,
+      year: yearVal,
+      pageCount: pagesVal,
+      pages: pagesVal,
+      coverUrl: finalCover,
+      coverImage: finalCover,
+      cover: finalCover,
+      description: finalDescription,
+      synopsis: finalDescription,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -225,32 +284,59 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'Book not found' });
     }
 
-    const { title, author, year, publishedYear, pages, pageCount, genres, synopsis, description, cover, coverUrl, isbn } = req.body;
+    const {
+      title,
+      author,
+      year,
+      publishedYear,
+      publicationYear,
+      pages,
+      pageCount,
+      genres,
+      synopsis,
+      description,
+      cover,
+      coverImage,
+      coverUrl,
+      isbn,
+    } = req.body;
 
     if (title !== undefined) {
-      if (!title || !title.trim()) {
+      if (!title || !String(title).trim()) {
         return res.status(400).json({ message: 'Title cannot be empty' });
       }
-      book.title = title.trim();
+      book.title = String(title).trim();
     }
 
     if (author !== undefined) {
-      if (!author || !author.trim()) {
+      if (!author || !String(author).trim()) {
         return res.status(400).json({ message: 'Author cannot be empty' });
       }
-      book.author = author.trim();
+      book.author = String(author).trim();
     }
 
-    if (year !== undefined || publishedYear !== undefined) {
-      const yearVal = Number(year !== undefined ? year : publishedYear);
+    const rawYear =
+      year !== undefined && year !== ''
+        ? year
+        : publicationYear !== undefined && publicationYear !== ''
+        ? publicationYear
+        : publishedYear;
+    if (rawYear !== undefined && rawYear !== '') {
+      const yearVal = Number(rawYear);
       if (isNaN(yearVal) || yearVal <= 0) {
         return res.status(400).json({ message: 'Publication year must be a valid positive number' });
       }
       book.publishedYear = yearVal;
     }
 
-    if (pages !== undefined || pageCount !== undefined) {
-      const pagesVal = Number(pages !== undefined ? pages : pageCount);
+    const rawPages =
+      pages !== undefined && pages !== ''
+        ? pages
+        : pageCount !== undefined && pageCount !== ''
+        ? pageCount
+        : undefined;
+    if (rawPages !== undefined) {
+      const pagesVal = Number(rawPages);
       if (isNaN(pagesVal) || pagesVal <= 0) {
         return res.status(400).json({ message: 'Page count must be a valid positive number' });
       }
@@ -258,15 +344,25 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     if (genres !== undefined) {
-      book.genres = Array.isArray(genres) ? genres : [genres];
+      let genresArray = [];
+      if (Array.isArray(genres)) {
+        genresArray = genres.map((g) => String(g).trim()).filter(Boolean);
+      } else if (typeof genres === 'string') {
+        genresArray = genres.split(',').map((g) => g.trim()).filter(Boolean);
+      }
+      if (genresArray.length > 0) {
+        book.genres = genresArray;
+      }
     }
 
-    if (synopsis !== undefined || description !== undefined) {
-      book.description = synopsis !== undefined ? synopsis : description;
+    const finalCover = cover !== undefined ? cover : (coverImage !== undefined ? coverImage : coverUrl);
+    if (finalCover !== undefined) {
+      book.coverUrl = finalCover;
     }
 
-    if (cover !== undefined || coverUrl !== undefined) {
-      book.coverUrl = cover !== undefined ? cover : coverUrl;
+    const finalDescription = synopsis !== undefined ? synopsis : description;
+    if (finalDescription !== undefined) {
+      book.description = finalDescription;
     }
 
     if (isbn !== undefined) {
@@ -274,7 +370,22 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     await book.save();
-    res.json(book);
+    const result = book.toJSON ? book.toJSON() : book;
+    res.json({
+      ...result,
+      id: String(book._id),
+      _id: book._id,
+      publishedYear: book.publishedYear,
+      publicationYear: book.publishedYear,
+      year: book.publishedYear,
+      pageCount: book.pageCount,
+      pages: book.pageCount,
+      coverUrl: book.coverUrl,
+      coverImage: book.coverUrl,
+      cover: book.coverUrl,
+      description: book.description,
+      synopsis: book.description,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

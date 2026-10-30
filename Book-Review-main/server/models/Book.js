@@ -67,6 +67,56 @@ BookSchema.virtual('averageRating').get(function () {
   return Number((this.ratingSum / this.ratingCount).toFixed(2));
 });
 
+// Key aliases for seamless client-server schema alignment
+BookSchema.virtual('cover')
+  .get(function () {
+    return this.coverUrl;
+  })
+  .set(function (val) {
+    this.coverUrl = val;
+  });
+
+BookSchema.virtual('coverImage')
+  .get(function () {
+    return this.coverUrl;
+  })
+  .set(function (val) {
+    this.coverUrl = val;
+  });
+
+BookSchema.virtual('synopsis')
+  .get(function () {
+    return this.description;
+  })
+  .set(function (val) {
+    this.description = val;
+  });
+
+BookSchema.virtual('year')
+  .get(function () {
+    return this.publishedYear;
+  })
+  .set(function (val) {
+    this.publishedYear = val;
+  });
+
+BookSchema.virtual('publicationYear')
+  .get(function () {
+    return this.publishedYear;
+  })
+  .set(function (val) {
+    this.publishedYear = val;
+  });
+
+BookSchema.virtual('pages')
+  .get(function () {
+    return this.pageCount;
+  })
+  .set(function (val) {
+    this.pageCount = val;
+  });
+
 BookSchema.set('toJSON', { virtuals: true });
+BookSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Book', BookSchema);

@@ -23,14 +23,23 @@ export default function Navbar({
   isSyncing = false,
   enable3DBooks = true,
   setEnable3DBooks,
+  ambienceMood = 'cozy',
+  setAmbienceMood,
   currentUser = null,
   onOpenDiary,
   firstBookId,
   onOpenAuth,
   onLogout,
 }) {
+  const navBg =
+    ambienceMood === 'cozy'
+      ? 'bg-[#1F140C]/90 border-amber-900/30'
+      : ambienceMood === 'velvet'
+      ? 'bg-[#180D2C]/90 border-purple-900/30'
+      : 'bg-[#0A1C36]/90 border-sky-900/30';
+
   return (
-    <header className="sticky top-0 z-30 border-b border-white/[0.09] bg-[#0D0A14]/85 backdrop-blur-xl">
+    <header className={`sticky top-0 z-30 border-b backdrop-blur-xl transition-colors duration-500 ${navBg}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
         {/* Brand Logo */}
         <div className="flex items-center gap-3">
@@ -130,6 +139,48 @@ export default function Navbar({
             <Layers size={13} />
             <span>3D Covers</span>
           </button>
+
+          {/* Ambience Quick Mood Switcher */}
+          {setAmbienceMood && (
+            <div className="hidden md:flex items-center gap-1 p-1 rounded-xl bg-white/[0.04] border border-white/10 text-xs">
+              {[
+                { id: 'cozy', label: '☕', name: 'Candlelit Study' },
+                { id: 'velvet', label: '🌙', name: 'Midnight Velvet' },
+                { id: 'starlight', label: '✨', name: 'Starlight Atrium' }
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setAmbienceMood(m.id);
+                    try {
+                      localStorage.setItem('aether_ambience_mood', m.id);
+                      const bgMap = {
+                        cozy: '#1F140C',
+                        velvet: '#180D2C',
+                        starlight: '#0A1C36'
+                      };
+                      const c = bgMap[m.id] || '#1F140C';
+                      document.body.style.backgroundColor = c;
+                      document.documentElement.style.backgroundColor = c;
+                    } catch (e) {}
+                  }}
+                  className={`px-2 py-1 rounded-lg transition-all text-xs ${
+                    ambienceMood === m.id
+                      ? m.id === 'cozy'
+                        ? 'bg-amber-500 text-slate-950 font-bold shadow-[0_0_12px_rgba(245,158,11,0.6)]'
+                        : m.id === 'velvet'
+                        ? 'bg-purple-500 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.6)]'
+                        : 'bg-sky-400 text-slate-950 font-bold shadow-[0_0_12px_rgba(56,189,248,0.6)]'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                  }`}
+                  title={`Switch Ambience: ${m.name}`}
+                >
+                  <span>{m.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           <button
             type="button"

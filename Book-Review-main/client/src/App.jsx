@@ -4,6 +4,8 @@ import {
   Calendar,
   Users,
   Bookmark,
+  BookMarked,
+  Code2,
   Database,
   Search,
   Plus,
@@ -69,7 +71,14 @@ export default function App() {
   const [users, setUsers] = useState(() => {
     try {
       const saved = localStorage.getItem('aether_users_v2');
-      return saved ? JSON.parse(saved) : INITIAL_USERS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const existingIds = new Set(parsed.map((u) => u.id || u._id));
+          return [...parsed, ...INITIAL_USERS.filter((u) => !existingIds.has(u.id))];
+        }
+      }
+      return INITIAL_USERS;
     } catch (e) {
       return INITIAL_USERS;
     }
@@ -126,7 +135,7 @@ export default function App() {
   }, [books, users, reviews, diaryEntries, socialNotes, currentUserId]);
 
   const currentUser = useMemo(
-    () => users.find((u) => u.id === currentUserId) || null,
+    () => users.find((u) => u.id === currentUserId || u._id === currentUserId) || null,
     [users, currentUserId]
   );
 
@@ -208,7 +217,12 @@ export default function App() {
           yearlyGoal: u.yearlyGoal || { read: 19, target: 24 },
           readingRitual: u.readingRitual || 'Reading by warm lamp light with cinnamon chai ☕',
         }));
-        setUsers(normalizedUsers);
+        const existingIds = new Set(normalizedUsers.map((u) => u.id));
+        const mergedUsers = [
+          ...normalizedUsers,
+          ...INITIAL_USERS.filter((u) => !existingIds.has(u.id))
+        ];
+        setUsers(mergedUsers);
       }
 
       // Fetch live reviews from MongoDB
@@ -308,7 +322,26 @@ export default function App() {
 
   // 3D & Humanized Ambience State
   const [enable3DBooks, setEnable3DBooks] = useState(true);
-  const [ambienceMood, setAmbienceMood] = useState('cozy'); // 'cozy' | 'velvet' | 'starlight'
+  const [ambienceMood, setAmbienceMood] = useState(() => {
+    try {
+      return localStorage.getItem('aether_ambience_mood') || 'cozy';
+    } catch (e) {
+      return 'cozy';
+    }
+  }); // 'cozy' | 'velvet' | 'starlight'
+
+  // Synchronize atmosphere background on <html> and <body>
+  useEffect(() => {
+    const bgMap = {
+      cozy: '#1F140C',
+      velvet: '#180D2C',
+      starlight: '#0A1C36'
+    };
+    const chosen = bgMap[ambienceMood] || '#1F140C';
+    document.body.style.backgroundColor = chosen;
+    document.documentElement.style.backgroundColor = chosen;
+    document.documentElement.setAttribute('data-ambience', ambienceMood);
+  }, [ambienceMood]);
 
   // Catalog Search & Filtering State
   const [searchQuery, setSearchQuery] = useState('');
@@ -335,6 +368,22 @@ export default function App() {
   const [noteBookId, setNoteBookId] = useState('bk-2');
   const [noteMessage, setNoteMessage] = useState('');
 
+  // Keep recommendation note targets synced with available users/books
+  useEffect(() => {
+    if (users.length > 0) {
+      const otherUser = users.find((u) => u.id !== currentUser?.id);
+      if (otherUser && (!noteTargetUserId || !users.some((u) => u.id === noteTargetUserId))) {
+        setNoteTargetUserId(otherUser.id);
+      }
+    }
+  }, [users, currentUser, noteTargetUserId]);
+
+  useEffect(() => {
+    if (books.length > 0 && (!noteBookId || !books.some((b) => b.id === noteBookId))) {
+      setNoteBookId(books[0].id);
+    }
+  }, [books, noteBookId]);
+
   // Diary Modal State
   const [diaryBookId, setDiaryBookId] = useState('bk-1');
   const [diaryStatus, setDiaryStatus] = useState('read');
@@ -358,15 +407,6 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authBio, setAuthBio] = useState('');
   const [authColor] = useState('#F59E0B');
-
-  // Custom Book Sync Form State
-  const [newBookTitle, setNewBookTitle] = useState('');
-  const [newBookAuthor, setNewBookAuthor] = useState('');
-  const [newBookYear, setNewBookYear] = useState('2024');
-  const [newBookPages] = useState('340');
-  const [newBookIsbn, setNewBookIsbn] = useState('978-0593440123');
-  const [newBookGenre, setNewBookGenre] = useState('Sci-Fi');
-  const [newBookDesc, setNewBookDesc] = useState('');
 
   const notify = (message, type = 'info') => {
     setToast({ message, type, id: Date.now() });
@@ -398,7 +438,7 @@ export default function App() {
   );
 
   const inspectedUser = useMemo(
-    () => users.find((u) => u.id === inspectedUserId) || users[0],
+    () => users.find((u) => u.id === inspectedUserId || u._id === inspectedUserId) || users[0] || null,
     [users, inspectedUserId]
   );
 
@@ -667,62 +707,6 @@ export default function App() {
     }
   };
 
-  const handleCreateCustomBook = async (e) => {
-    e.preventDefault();
-    if (!newBookTitle.trim() || !newBookAuthor.trim()) {
-      notify('Please provide both a Book Title and Author.', 'error');
-      return;
-    }
-    const created = {
-      id: `bk-${Date.now()}`,
-      externalId: `GB-CUSTOM-${Date.now()}`,
-      sourceApi: 'Custom ISBN Entry',
-      isbn: newBookIsbn.trim() || '978-0000000000',
-      title: newBookTitle.trim(),
-      author: newBookAuthor.trim(),
-      publishedYear: parseInt(newBookYear, 10) || 2025,
-      pageCount: parseInt(newBookPages, 10) || 320,
-      genres: [newBookGenre, 'Speculative'],
-      palette: ['#F59E0B', '#78350F', '#1C140D'],
-      pattern: 'orbital',
-      coverUrl: '',
-      description:
-        newBookDesc.trim() ||
-        `A newly indexed edition by ${newBookAuthor.trim()}, connected to the Aether Reads catalog for community 5-star reviews and reading diaries.`,
-      likesCount: 1,
-      dislikesCount: 0,
-      favoritesCount: 1
-    };
-    setBooks((prev) => [created, ...prev]);
-    setShowAddBookModal(false);
-    setNewBookTitle('');
-    setNewBookAuthor('');
-    setNewBookDesc('');
-    setSelectedBookId(created.id);
-    notify(`Added "${created.title}" to your 3D Book Shelf!`, 'success');
-
-    // Persist to MongoDB
-    try {
-      const saved = await api.createBook({
-        title: created.title,
-        author: created.author,
-        publishedYear: created.publishedYear,
-        pageCount: created.pageCount,
-        isbn: created.isbn,
-        genres: created.genres,
-        coverUrl: created.coverUrl,
-        description: created.description,
-      });
-      if (saved && saved._id) {
-        setBooks((prev) =>
-          prev.map((b) => (b.id === created.id ? { ...b, id: String(saved._id), _id: saved._id } : b))
-        );
-      }
-    } catch (err) {
-      console.warn('MongoDB custom book notice:', err.message);
-    }
-  };
-
   // ---------------------------------------------------------------------------
   // Handlers: Favorite, Like & Dislike Book (Keyed per User)
   // ---------------------------------------------------------------------------
@@ -733,9 +717,9 @@ export default function App() {
       return;
     }
 
-    const isFav = currentUser.favorites.includes(bookId);
-    const isLiked = currentUser.likedBooks.includes(bookId);
-    const isDisliked = currentUser.dislikedBooks.includes(bookId);
+    const isFav = (currentUser.favorites || []).includes(bookId);
+    const isLiked = (currentUser.likedBooks || []).includes(bookId);
+    const isDisliked = (currentUser.dislikedBooks || []).includes(bookId);
 
     setUsers((prevUsers) =>
       prevUsers.map((u) => {
@@ -744,26 +728,26 @@ export default function App() {
           return {
             ...u,
             favorites: isFav
-              ? u.favorites.filter((id) => id !== bookId)
-              : [...u.favorites, bookId]
+              ? (u.favorites || []).filter((id) => id !== bookId)
+              : [...(u.favorites || []), bookId]
           };
         }
         if (reactionType === 'like') {
           return {
             ...u,
             likedBooks: isLiked
-              ? u.likedBooks.filter((id) => id !== bookId)
-              : [...u.likedBooks, bookId],
-            dislikedBooks: u.dislikedBooks.filter((id) => id !== bookId)
+              ? (u.likedBooks || []).filter((id) => id !== bookId)
+              : [...(u.likedBooks || []), bookId],
+            dislikedBooks: (u.dislikedBooks || []).filter((id) => id !== bookId)
           };
         }
         if (reactionType === 'dislike') {
           return {
             ...u,
             dislikedBooks: isDisliked
-              ? u.dislikedBooks.filter((id) => id !== bookId)
-              : [...u.dislikedBooks, bookId],
-            likedBooks: u.likedBooks.filter((id) => id !== bookId)
+              ? (u.dislikedBooks || []).filter((id) => id !== bookId)
+              : [...(u.dislikedBooks || []), bookId],
+            likedBooks: (u.likedBooks || []).filter((id) => id !== bookId)
           };
         }
         return u;
@@ -874,8 +858,8 @@ export default function App() {
         diaryNotes: reviewThoughts.trim(),
         pagesRead: selectedBook.pageCount || 320,
         isReread: false,
-        liked: currentUser.likedBooks.includes(selectedBook.id),
-        addedToFavorites: currentUser.favorites.includes(selectedBook.id),
+        liked: (currentUser.likedBooks || []).includes(selectedBook.id || selectedBook._id),
+        addedToFavorites: (currentUser.favorites || []).includes(selectedBook.id || selectedBook._id),
         comments: []
       };
       setDiaryEntries((prev) => [newDiary, ...prev]);
@@ -888,8 +872,8 @@ export default function App() {
         diaryNotes: reviewThoughts.trim(),
         pagesRead: selectedBook.pageCount || 320,
         isReread: false,
-        liked: currentUser.likedBooks.includes(selectedBook.id),
-        addedToFavorites: currentUser.favorites.includes(selectedBook.id),
+        liked: (currentUser.likedBooks || []).includes(selectedBook.id || selectedBook._id),
+        addedToFavorites: (currentUser.favorites || []).includes(selectedBook.id || selectedBook._id),
       }).catch((err) => console.warn('MongoDB diary notice:', err.message));
     }
 
@@ -907,30 +891,33 @@ export default function App() {
       setShowAuthModal(true);
       return;
     }
+    const cId = currentUser.id || currentUser._id;
     if (reaction === 'like') {
       api.reactReview(reviewId).catch((err) => console.warn('MongoDB reactReview notice:', err.message));
     }
     setReviews((prev) =>
       prev.map((r) => {
-        if (r.id !== reviewId) return r;
-        const hasLiked = r.likes.includes(currentUser.id);
-        const hasDisliked = r.dislikes.includes(currentUser.id);
+        if (r.id !== reviewId && r._id !== reviewId) return r;
+        const rLikes = r.likes || [];
+        const rDislikes = r.dislikes || [];
+        const hasLiked = rLikes.includes(cId);
+        const hasDisliked = rDislikes.includes(cId);
         if (reaction === 'like') {
           return {
             ...r,
             likes: hasLiked
-              ? r.likes.filter((id) => id !== currentUser.id)
-              : [...r.likes, currentUser.id],
-            dislikes: r.dislikes.filter((id) => id !== currentUser.id)
+              ? rLikes.filter((id) => id !== cId)
+              : [...rLikes, cId],
+            dislikes: rDislikes.filter((id) => id !== cId)
           };
         }
         if (reaction === 'dislike') {
           return {
             ...r,
             dislikes: hasDisliked
-              ? r.dislikes.filter((id) => id !== currentUser.id)
-              : [...r.dislikes, currentUser.id],
-            likes: r.likes.filter((id) => id !== currentUser.id)
+              ? rDislikes.filter((id) => id !== cId)
+              : [...rDislikes, cId],
+            likes: rLikes.filter((id) => id !== cId)
           };
         }
         // Humanized resonance reaction pills ('insightful' | 'moved' | 'fire' | 'cozy')
@@ -1107,25 +1094,28 @@ export default function App() {
     }
     if (targetUserId === currentUser.id) return;
 
-    const isFollowing = currentUser.following.includes(targetUserId);
+    const currentFollowing = currentUser.following || [];
+    const isFollowing = currentFollowing.includes(targetUserId);
     const targetUser = users.find((u) => u.id === targetUserId);
 
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === currentUser.id) {
+          const prevFollowing = u.following || [];
           return {
             ...u,
             following: isFollowing
-              ? u.following.filter((id) => id !== targetUserId)
-              : [...u.following, targetUserId]
+              ? prevFollowing.filter((id) => id !== targetUserId)
+              : [...prevFollowing, targetUserId]
           };
         }
         if (u.id === targetUserId) {
+          const prevFollowers = u.followers || [];
           return {
             ...u,
             followers: isFollowing
-              ? u.followers.filter((id) => id !== currentUser.id)
-              : [...u.followers, currentUser.id]
+              ? prevFollowers.filter((id) => id !== currentUser.id)
+              : [...prevFollowers, currentUser.id]
           };
         }
         return u;
@@ -1137,8 +1127,8 @@ export default function App() {
 
     notify(
       isFollowing
-        ? `Unfollowed @${targetUser?.username}`
-        : `Now following @${targetUser?.username} — their Diary & Likes are in your Social Pulse!`,
+        ? `Unfollowed @${targetUser?.username || 'reader'}`
+        : `Now following @${targetUser?.username || 'reader'} — their Diary & Likes are in your Social Pulse!`,
       'success'
     );
   };
@@ -1271,16 +1261,16 @@ export default function App() {
   const socialFeedItems = useMemo(() => {
     const allowedUserIds =
       socialScope === 'following' && currentUser
-        ? currentUser.following
-        : users.map((u) => u.id);
+        ? (currentUser.following || [])
+        : users.map((u) => u.id || u._id);
 
     const revItems = reviews
-      .filter((r) => allowedUserIds.includes(r.userId))
+      .filter((r) => (allowedUserIds || []).includes(r.userId))
       .map((r) => ({
         type: 'review',
-        id: `feed-rev-${r.id}`,
-        rawId: r.id,
-        date: r.createdAt.slice(0, 10),
+        id: `feed-rev-${r.id || r._id}`,
+        rawId: r.id || r._id,
+        date: (r.createdAt || '').slice(0, 10),
         userId: r.userId,
         bookId: r.bookId,
         rating: r.rating,
@@ -1292,12 +1282,12 @@ export default function App() {
       }));
 
     const diaryItems = diaryEntries
-      .filter((d) => allowedUserIds.includes(d.userId))
+      .filter((d) => (allowedUserIds || []).includes(d.userId))
       .map((d) => ({
         type: 'diary',
-        id: `feed-dry-${d.id}`,
-        rawId: d.id,
-        date: d.readDate,
+        id: `feed-dry-${d.id || d._id}`,
+        rawId: d.id || d._id,
+        date: d.readDate || '',
         userId: d.userId,
         bookId: d.bookId,
         rating: d.rating,
@@ -1308,25 +1298,26 @@ export default function App() {
         comments: d.comments || []
       }));
 
-    return [...revItems, ...diaryItems].sort((a, b) => b.date.localeCompare(a.date));
+    return [...revItems, ...diaryItems].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [reviews, diaryEntries, socialScope, currentUser, users]);
 
   const myDiaryEntries = useMemo(() => {
     if (!currentUser) return [];
     return diaryEntries
-      .filter((d) => d.userId === currentUser.id)
+      .filter((d) => d.userId === currentUser.id || d.userId === currentUser._id)
       .filter((d) => diaryFilterStatus === 'all' || d.status === diaryFilterStatus)
-      .sort((a, b) => b.readDate.localeCompare(a.readDate));
+      .sort((a, b) => (b.readDate || '').localeCompare(a.readDate || ''));
   }, [diaryEntries, currentUser, diaryFilterStatus]);
 
   const myStats = useMemo(() => {
     if (!currentUser) {
       return { readCount: 0, totalPages: 0, avgRating: 0, reviewsCount: 0 };
     }
-    const allMyDiary = diaryEntries.filter((d) => d.userId === currentUser.id);
+    const cId = currentUser.id || currentUser._id;
+    const allMyDiary = diaryEntries.filter((d) => d.userId === cId);
     const readCount = allMyDiary.filter((d) => d.status === 'read').length;
     const totalPages = allMyDiary.reduce((acc, d) => acc + (d.pagesRead || 0), 0);
-    const myRevs = reviews.filter((r) => r.userId === currentUser.id);
+    const myRevs = reviews.filter((r) => r.userId === cId);
     const avgRating =
       myRevs.length > 0
         ? (myRevs.reduce((acc, r) => acc + r.rating, 0) / myRevs.length).toFixed(1)
@@ -1336,10 +1327,10 @@ export default function App() {
 
   const themeBg =
     ambienceMood === 'cozy'
-      ? 'bg-[#0E0B14]'
+      ? 'bg-[#1F140C]'
       : ambienceMood === 'velvet'
-      ? 'bg-[#090812]'
-      : 'bg-[#060913]';
+      ? 'bg-[#180D2C]'
+      : 'bg-[#0A1C36]';
 
 
   // ---------------------------------------------------------------------------
@@ -1351,66 +1342,68 @@ export default function App() {
   };
 
   const handleSaveBook = async (bookData, bookToEdit) => {
+    const palettes = [
+      ['#F59E0B', '#78350F', '#1C140D'],
+      ['#38BDF8', '#1E3A8A', '#090D16'],
+      ['#818CF8', '#311042', '#090A10'],
+      ['#2DD4BF', '#064E3B', '#05080F'],
+      ['#F43F5E', '#4C0519', '#160B11'],
+    ];
+    const patterns = ['rings', 'orbital', 'trinary', 'matrix', 'horizon', 'monolith'];
+    const randomPalette = palettes[Math.floor(Math.random() * palettes.length)];
+    const randomPattern = patterns[Math.floor(Math.random() * patterns.length)];
+
     if (bookToEdit) {
       const bookId = bookToEdit.id || bookToEdit._id;
-      setBooks((prev) =>
-        prev.map((b) =>
-          b.id === bookId || b._id === bookId ? { ...b, ...bookData } : b
-        )
-      );
+      let updated = null;
       try {
-        const updated = await api.updateBook(bookId, bookData);
-        if (updated && (updated.id || updated._id)) {
-          const normUpdated = {
-            ...updated,
-            id: updated._id ? String(updated._id) : updated.id,
-          };
-          setBooks((prev) =>
-            prev.map((b) =>
-              b.id === bookId || b._id === bookId ? { ...b, ...normUpdated } : b
-            )
-          );
-        }
-        notify(`Updated dossier for "${bookData.title}"!`, 'success');
+        updated = await api.updateBook(bookId, bookData);
       } catch (err) {
         console.warn('Backend update notice:', err.message);
-        notify(`Updated "${bookData.title}" in local session!`, 'info');
+        throw err;
       }
+      const normUpdated = {
+        ...bookToEdit,
+        ...bookData,
+        ...(updated || {}),
+        id: updated?._id ? String(updated._id) : (updated?.id || bookId),
+        _id: updated?._id || bookToEdit._id || bookId,
+        palette: bookToEdit.palette || randomPalette,
+        pattern: bookToEdit.pattern || randomPattern,
+      };
+      setBooks((prev) =>
+        prev.map((b) => (b.id === bookId || b._id === bookId ? normUpdated : b))
+      );
+      notify(`Updated dossier for "${bookData.title}"!`, 'success');
     } else {
-      const created = {
-        id: `custom-${Date.now()}`,
-        title: bookData.title,
-        author: bookData.author,
-        isbn: bookData.isbn || `978-00000${Math.floor(1000 + Math.random() * 9000)}`,
-        publishedYear: Number(bookData.year || 2024),
-        pageCount: Number(bookData.pages || 320),
-        genres: bookData.genres || ['Sci-Fi'],
-        description: bookData.description || '',
-        coverUrl: bookData.coverUrl || '',
-        palette: ['#38BDF8', '#0369A1', '#0C4A6E'],
-        pattern: 'monolith',
+      let saved = null;
+      try {
+        saved = await api.createBook(bookData);
+      } catch (err) {
+        console.warn('Backend book create notice:', err.message);
+        throw err;
+      }
+
+      const savedId = String(saved?._id || saved?.id || `custom-${Date.now()}`);
+      const newBook = {
         likesCount: 0,
         dislikesCount: 0,
         favoritesCount: 0,
+        palette: randomPalette,
+        pattern: randomPattern,
+        ...bookData,
+        ...(saved || {}),
+        id: savedId,
+        _id: saved?._id || savedId,
+        publishedYear: Number(saved?.publishedYear || bookData.publishedYear || bookData.year || new Date().getFullYear()),
+        pageCount: Number(saved?.pageCount || bookData.pageCount || bookData.pages || 320),
+        coverUrl: saved?.coverUrl || bookData.coverUrl || bookData.cover || '',
+        description: saved?.description || bookData.description || bookData.synopsis || '',
       };
-      setBooks((prev) => [created, ...prev]);
-      setSelectedBookId(created.id);
-      notify(`Successfully indexed "${created.title}" into catalog!`, 'success');
 
-      try {
-        const saved = await api.createBook(bookData);
-        if (saved && saved._id) {
-          setBooks((prev) =>
-            prev.map((b) =>
-              b.id === created.id
-                ? { ...b, id: String(saved._id), _id: saved._id }
-                : b
-            )
-          );
-        }
-      } catch (err) {
-        console.warn('Backend book create notice:', err.message);
-      }
+      setBooks((prev) => [newBook, ...prev]);
+      setSelectedBookId(savedId);
+      notify(`Successfully added "${newBook.title}" to catalog!`, 'success');
     }
   };
 
@@ -1555,10 +1548,36 @@ export default function App() {
       className={`min-h-screen ${themeBg} text-slate-100 font-sans selection:bg-amber-500/30 selection:text-amber-200 relative overflow-x-hidden transition-colors duration-500`}
     >
       {/* Warm Humanized & Futuristic Ambient Light Fields */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
-        <div className="absolute -top-36 left-1/4 w-[38rem] h-[38rem] rounded-full bg-amber-500/[0.08] blur-[140px]" />
-        <div className="absolute top-1/3 -right-32 w-[34rem] h-[34rem] rounded-full bg-rose-500/[0.06] blur-[140px]" />
-        <div className="absolute -bottom-48 left-1/3 w-[32rem] h-[32rem] rounded-full bg-sky-500/[0.06] blur-[130px]" />
+      <div
+        className={`pointer-events-none fixed inset-0 overflow-hidden z-0 transition-opacity duration-700 ${
+          ambienceMood === 'cozy'
+            ? 'ambient-glow-amber'
+            : ambienceMood === 'velvet'
+            ? 'ambient-glow-velvet'
+            : 'ambient-glow-starlight'
+        }`}
+      >
+        {ambienceMood === 'cozy' && (
+          <>
+            <div className="absolute -top-32 left-1/4 w-[45rem] h-[45rem] rounded-full bg-amber-500/[0.24] blur-[120px]" />
+            <div className="absolute top-1/3 -right-28 w-[40rem] h-[40rem] rounded-full bg-orange-600/[0.20] blur-[130px]" />
+            <div className="absolute -bottom-40 left-1/3 w-[38rem] h-[38rem] rounded-full bg-yellow-600/[0.18] blur-[120px]" />
+          </>
+        )}
+        {ambienceMood === 'velvet' && (
+          <>
+            <div className="absolute -top-32 left-1/4 w-[45rem] h-[45rem] rounded-full bg-purple-600/[0.28] blur-[120px]" />
+            <div className="absolute top-1/3 -right-28 w-[40rem] h-[40rem] rounded-full bg-fuchsia-600/[0.22] blur-[130px]" />
+            <div className="absolute -bottom-40 left-1/3 w-[38rem] h-[38rem] rounded-full bg-indigo-600/[0.22] blur-[120px]" />
+          </>
+        )}
+        {ambienceMood === 'starlight' && (
+          <>
+            <div className="absolute -top-32 left-1/4 w-[45rem] h-[45rem] rounded-full bg-sky-500/[0.28] blur-[120px]" />
+            <div className="absolute top-1/3 -right-28 w-[40rem] h-[40rem] rounded-full bg-cyan-500/[0.22] blur-[130px]" />
+            <div className="absolute -bottom-40 left-1/3 w-[38rem] h-[38rem] rounded-full bg-blue-600/[0.24] blur-[120px]" />
+          </>
+        )}
       </div>
 
       {/* Floating Toast Notification */}
@@ -1589,6 +1608,8 @@ export default function App() {
         isSyncing={isSyncing}
         enable3DBooks={enable3DBooks}
         setEnable3DBooks={setEnable3DBooks}
+        ambienceMood={ambienceMood}
+        setAmbienceMood={setAmbienceMood}
         currentUser={currentUser}
         onOpenDiary={openLogDiaryForBook}
         firstBookId={books[0]?.id || 'bk-1'}
@@ -1606,15 +1627,31 @@ export default function App() {
         {activeTab === 'discover' && (
           <div className="space-y-6">
             {/* Warm Humanized Hero & 3D Interactive Bookshelf Showcase */}
-            <div className="relative overflow-hidden rounded-3xl border border-amber-200/15 bg-gradient-to-br from-[#1A1423]/95 via-[#12101B]/95 to-[#1F1624]/90 p-6 sm:p-8 shadow-2xl">
+            <div
+              className={`relative overflow-hidden rounded-3xl border transition-all duration-500 p-6 sm:p-8 shadow-2xl ${
+                ambienceMood === 'cozy'
+                  ? 'border-amber-500/40 bg-gradient-to-br from-[#2C180C] via-[#1E1108] to-[#2E190E] shadow-[0_0_50px_rgba(245,158,11,0.25)]'
+                  : ambienceMood === 'velvet'
+                  ? 'border-purple-500/40 bg-gradient-to-br from-[#291147] via-[#17092C] to-[#321357] shadow-[0_0_50px_rgba(168,85,247,0.30)]'
+                  : 'border-sky-500/40 bg-gradient-to-br from-[#0B2A4F] via-[#071933] to-[#0F3663] shadow-[0_0_50px_rgba(56,189,248,0.30)]'
+              }`}
+            >
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
                 <div className="space-y-3.5 max-w-xl">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-200 text-xs">
-                    <Coffee size={13} className="text-amber-300" />
+                  <div
+                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs transition-colors ${
+                      ambienceMood === 'cozy'
+                        ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
+                        : ambienceMood === 'velvet'
+                        ? 'bg-purple-500/20 border-purple-400/40 text-purple-200'
+                        : 'bg-sky-500/20 border-sky-400/40 text-sky-200'
+                    }`}
+                  >
+                    <Coffee size={13} className={ambienceMood === 'cozy' ? 'text-amber-300' : ambienceMood === 'velvet' ? 'text-purple-300' : 'text-sky-300'} />
                     <span>
                       {currentUser
-                        ? currentUser.readingRitual || 'Welcome back to your cozy reading sanctuary'
-                        : 'Cozy Social Reading Sanctuary • Connected to Google Books'}
+                        ? currentUser.readingRitual || 'Welcome back to your reading sanctuary'
+                        : 'Social Reading Sanctuary • Connected to Google Books Archive'}
                     </span>
                   </div>
                   <h1 className="text-2xl sm:text-4xl font-serif font-bold tracking-tight text-white leading-tight">
@@ -1627,45 +1664,73 @@ export default function App() {
                   </p>
 
                   {/* Ambience Mood Pills */}
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <span className="text-xs text-slate-400">Reading Ambience:</span>
+                  <div className="flex flex-wrap items-center gap-2 pt-2">
+                    <span className="text-xs text-slate-300 font-medium">Reading Ambience:</span>
                     {[
-                      { id: 'cozy', label: '☕ Candlelit Study' },
-                      { id: 'velvet', label: '🌙 Midnight Velvet' },
-                      { id: 'starlight', label: '✨ Starlight Atrium' }
-                    ].map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setAmbienceMood(m.id)}
-                        className={`px-2.5 py-1 rounded-lg text-xs transition-all ${
-                          ambienceMood === m.id
-                            ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40'
-                            : 'bg-white/[0.04] text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
+                      {
+                        id: 'cozy',
+                        label: '☕ Candlelit Study',
+                        activeClass:
+                          'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold border-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.65)] scale-105',
+                        inactiveClass:
+                          'bg-black/40 border-amber-500/25 text-amber-100/70 hover:text-white hover:bg-amber-500/20'
+                      },
+                      {
+                        id: 'velvet',
+                        label: '🌙 Midnight Velvet',
+                        activeClass:
+                          'bg-gradient-to-r from-purple-500 to-fuchsia-600 text-white font-bold border-purple-300 shadow-[0_0_20px_rgba(168,85,247,0.70)] scale-105',
+                        inactiveClass:
+                          'bg-black/40 border-purple-500/25 text-purple-100/70 hover:text-white hover:bg-purple-500/20'
+                      },
+                      {
+                        id: 'starlight',
+                        label: '✨ Starlight Atrium',
+                        activeClass:
+                          'bg-gradient-to-r from-sky-400 to-cyan-500 text-slate-950 font-bold border-sky-200 shadow-[0_0_20px_rgba(56,189,248,0.70)] scale-105',
+                        inactiveClass:
+                          'bg-black/40 border-sky-500/25 text-sky-100/70 hover:text-white hover:bg-sky-500/20'
+                      }
+                    ].map((m) => {
+                      const isActive = ambienceMood === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setAmbienceMood(m.id);
+                            try {
+                              localStorage.setItem('aether_ambience_mood', m.id);
+                              const bgMap = {
+                                cozy: '#1F140C',
+                                velvet: '#180D2C',
+                                starlight: '#0A1C36'
+                              };
+                              const c = bgMap[m.id] || '#1F140C';
+                              document.body.style.backgroundColor = c;
+                              document.documentElement.style.backgroundColor = c;
+                            } catch (e) {}
+                            notify(`Reading ambience switched to ${m.label}`, 'info');
+                          }}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs border transition-all duration-300 cursor-pointer ${
+                            isActive ? m.activeClass : m.inactiveClass
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* 3D Interactive Floating Shelf Showcase */}
                 <div className="flex-1 max-w-lg mx-auto lg:mx-0 w-full">
-                  <div className="relative pt-4 pb-6 px-6 rounded-2xl bg-gradient-to-b from-white/[0.03] to-amber-950/20 border border-white/10">
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-xs font-medium text-amber-200/90 flex items-center gap-1.5">
-                        <Sparkles size={13} className="text-amber-400" />
-                        <span>Featured 3D Hardcover Showcase (Hover to Tilt)</span>
-                      </span>
-                      <span className="text-[11px] text-slate-400">Click any book to review</span>
-                    </div>
-
+                  <div className="relative pt-6 pb-6 px-6 rounded-2xl bg-gradient-to-b from-white/[0.03] to-amber-950/20 border border-white/10">
                     <div className="flex items-end justify-around gap-3 pt-2 pb-3">
                       {books.slice(0, 4).map((b) => (
                         <div
-                          key={b.id}
-                          onClick={() => setSelectedBookId(b.id)}
+                          key={b.id || b._id}
+                          onClick={() => setSelectedBookId(b.id || b._id)}
                           className="cursor-pointer"
                         >
                           <FuturisticBookCover book={b} size="sm" is3D={true} />
@@ -1736,11 +1801,14 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowAddBookModal(true)}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/15 text-xs font-medium text-amber-200 transition-all"
+                    onClick={() => {
+                      setEditingBook(null);
+                      setShowAddBookModal(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bold text-xs shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all"
                   >
                     <Plus size={14} />
-                    <span>Index Custom Book by ISBN</span>
+                    <span>+ Add Custom Book</span>
                   </button>
                 </div>
               </div>
@@ -1946,14 +2014,16 @@ export default function App() {
                   reviewCount: 0,
                   readCount: 0
                 };
-                const isFav = currentUser?.favorites.includes(book.id);
-                const isLiked = currentUser?.likedBooks.includes(book.id);
-                const isDisliked = currentUser?.dislikedBooks.includes(book.id);
+                const isFav = (currentUser?.favorites || []).includes(book.id || book._id);
+                const isLiked = (currentUser?.likedBooks || []).includes(book.id || book._id);
+                const isDisliked = (currentUser?.dislikedBooks || []).includes(book.id || book._id);
                 const isReadInDiary =
                   currentUser &&
                   diaryEntries.some(
                     (d) =>
-                      d.userId === currentUser.id && d.bookId === book.id && d.status === 'read'
+                      (d.userId === currentUser.id || d.userId === currentUser._id) &&
+                      (d.bookId === book.id || d.bookId === book._id) &&
+                      d.status === 'read'
                   );
 
                 return (
@@ -2027,7 +2097,7 @@ export default function App() {
                 <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
                   <p className="text-xs text-slate-400">Kindred Followers</p>
                   <p className="text-2xl font-bold text-rose-300 mt-1">
-                    {currentUser ? currentUser.followers.length : 0}
+                    {currentUser ? (currentUser.followers || []).length : 0}
                   </p>
                 </div>
               </div>
@@ -2076,7 +2146,7 @@ export default function App() {
                 </div>
               ) : (
                 myDiaryEntries.map((entry) => {
-                  const book = books.find((b) => b.id === entry.bookId) || books[0];
+                  const book = books.find((b) => b.id === entry.bookId || b._id === entry.bookId) || books[0];
                   return (
                     <div
                       key={entry.id}
@@ -2085,15 +2155,15 @@ export default function App() {
                       <div className="flex items-start gap-5">
                         <div className="w-16 text-center p-2.5 rounded-2xl bg-amber-500/10 border border-amber-400/20 shrink-0 font-mono">
                           <p className="text-[10px] text-amber-300 uppercase">
-                            {entry.readDate.slice(0, 7)}
+                            {(entry.readDate || '').slice(0, 7)}
                           </p>
                           <p className="text-xl font-bold text-white mt-0.5">
-                            {entry.readDate.slice(8, 10)}
+                            {(entry.readDate || '').slice(8, 10)}
                           </p>
                         </div>
 
                         <div
-                          onClick={() => setSelectedBookId(book.id)}
+                          onClick={() => (book?.id || book?._id) && setSelectedBookId(book.id || book._id)}
                           className="cursor-pointer shrink-0"
                         >
                           <FuturisticBookCover book={book} size="sm" is3D={enable3DBooks} />
@@ -2125,12 +2195,12 @@ export default function App() {
                           </div>
 
                           <h3
-                            onClick={() => setSelectedBookId(book.id)}
+                            onClick={() => (book?.id || book?._id) && setSelectedBookId(book.id || book._id)}
                             className="text-base font-serif font-bold text-white hover:text-amber-200 cursor-pointer"
                           >
-                            {book.title}{' '}
+                            {book?.title || 'Book'}{' '}
                             <span className="text-xs font-sans font-normal text-slate-400">
-                              by {book.author}
+                              by {book?.author || 'Unknown'}
                             </span>
                           </h3>
 
@@ -2147,7 +2217,7 @@ export default function App() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => setSelectedBookId(book.id)}
+                            onClick={() => (book?.id || book?._id) && setSelectedBookId(book.id || book._id)}
                             className="px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/10 text-xs text-slate-300"
                           >
                             Book Dossier
@@ -2203,17 +2273,17 @@ export default function App() {
 
                 <div className="space-y-3">
                   {users.map((reader) => {
-                    const isMe = currentUser?.id === reader.id;
-                    const isFollowing = currentUser?.following.includes(reader.id);
-                    const isInspected = inspectedUser?.id === reader.id;
+                    const isMe = (currentUser?.id === reader.id || currentUser?._id === reader.id);
+                    const isFollowing = (currentUser?.following || []).includes(reader.id || reader._id);
+                    const isInspected = (inspectedUser?.id === reader.id || inspectedUser?._id === reader.id);
                     const readerDiaryCount = diaryEntries.filter(
-                      (d) => d.userId === reader.id && d.status === 'read'
+                      (d) => (d.userId === reader.id || d.userId === reader._id) && d.status === 'read'
                     ).length;
 
                     return (
                       <div
-                        key={reader.id}
-                        onClick={() => setInspectedUserId(reader.id)}
+                        key={reader.id || reader._id}
+                        onClick={() => setInspectedUserId(reader.id || reader._id)}
                         className={`p-4 rounded-2xl border transition-all cursor-pointer ${
                           isInspected
                             ? 'bg-amber-500/10 border-amber-400/50 shadow-[0_0_25px_rgba(245,158,11,0.12)]'
@@ -2226,7 +2296,7 @@ export default function App() {
                             <div>
                               <div className="flex items-center gap-1.5">
                                 <span className="text-sm font-bold text-white">
-                                  {reader.displayName}
+                                  {reader.displayName || reader.username}
                                 </span>
                                 {isMe && (
                                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
@@ -2234,7 +2304,7 @@ export default function App() {
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-slate-400">@{reader.username}</p>
+                              <p className="text-xs text-slate-400">@{reader.username || 'reader'}</p>
                               <p className="text-[11px] text-amber-200/80 mt-0.5">
                                 {reader.readingRitual || 'Reading with warm tea ☕'}
                               </p>
@@ -2246,7 +2316,7 @@ export default function App() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleToggleFollow(reader.id);
+                                handleToggleFollow(reader.id || reader._id);
                               }}
                               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                                 isFollowing
@@ -2259,20 +2329,20 @@ export default function App() {
                           )}
                         </div>
 
-                        <p className="text-xs text-slate-300/90 mt-2.5 line-clamp-2">{reader.bio}</p>
+                        <p className="text-xs text-slate-300/90 mt-2.5 line-clamp-2">{reader.bio || 'Book lover exploring stories.'}</p>
 
                         <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-white/[0.06] text-[11px] text-slate-400">
                           <span>
-                            <strong className="text-white">{reader.favorites.length}</strong> Favs
+                            <strong className="text-white">{(reader.favorites || []).length}</strong> Favs
                           </span>
                           <span>
-                            <strong className="text-white">{reader.likedBooks.length}</strong> Likes
+                            <strong className="text-white">{(reader.likedBooks || []).length}</strong> Likes
                           </span>
                           <span>
                             <strong className="text-white">{readerDiaryCount}</strong> Read in Diary
                           </span>
                           <span>
-                            <strong className="text-white">{reader.followers.length}</strong>{' '}
+                            <strong className="text-white">{(reader.followers || []).length}</strong>{' '}
                             Followers
                           </span>
                         </div>
@@ -2293,7 +2363,7 @@ export default function App() {
                           READER SANCTUARY &amp; 3D SHELF
                         </span>
                         <h3 className="text-base font-bold text-white">
-                          @{inspectedUser.username}’s Shelves &amp; Diary
+                          @{inspectedUser.username || 'reader'}’s Shelves &amp; Diary
                         </h3>
                       </div>
                     </div>
@@ -2303,17 +2373,17 @@ export default function App() {
                   <div>
                     <p className="text-xs font-mono uppercase text-slate-300 mb-2 flex items-center gap-1.5">
                       <Heart size={12} className="text-rose-400 fill-rose-400" /> Favorite Books (
-                      {inspectedUser.favorites.length})
+                      {(inspectedUser.favorites || []).length})
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {inspectedUser.favorites.map((bId) => {
-                        const b = books.find((item) => item.id === bId);
+                      {(inspectedUser.favorites || []).map((bId) => {
+                        const b = books.find((item) => item.id === bId || item._id === bId);
                         if (!b) return null;
                         return (
                           <button
-                            key={b.id}
+                            key={b.id || b._id}
                             type="button"
-                            onClick={() => setSelectedBookId(b.id)}
+                            onClick={() => setSelectedBookId(b.id || b._id)}
                             className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-400/30 text-xs text-rose-200 flex items-center gap-1.5 transition-all"
                           >
                             <BookOpen size={12} />
@@ -2327,17 +2397,17 @@ export default function App() {
                   <div>
                     <p className="text-xs font-mono uppercase text-slate-300 mb-2 flex items-center gap-1.5">
                       <ThumbsUp size={12} className="text-emerald-400" /> Liked Books (
-                      {inspectedUser.likedBooks.length})
+                      {(inspectedUser.likedBooks || []).length})
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {inspectedUser.likedBooks.map((bId) => {
-                        const b = books.find((item) => item.id === bId);
+                      {(inspectedUser.likedBooks || []).map((bId) => {
+                        const b = books.find((item) => item.id === bId || item._id === bId);
                         if (!b) return null;
                         return (
                           <button
-                            key={b.id}
+                            key={b.id || b._id}
                             type="button"
-                            onClick={() => setSelectedBookId(b.id)}
+                            onClick={() => setSelectedBookId(b.id || b._id)}
                             className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-400/25 text-xs text-emerald-200 transition-all"
                           >
                             {b.title}
@@ -2408,13 +2478,17 @@ export default function App() {
                       onChange={(e) => setNoteTargetUserId(e.target.value)}
                       className="w-full rounded-xl bg-slate-950/90 border border-white/15 px-3 py-1.5 text-xs text-white"
                     >
-                      {users
-                        .filter((u) => u.id !== currentUser?.id)
-                        .map((u) => (
-                          <option key={u.id} value={u.id}>
-                            @{u.username} ({u.displayName})
-                          </option>
-                        ))}
+                      {users.filter((u) => u.id !== currentUser?.id).length === 0 ? (
+                        <option value="">No other readers registered yet</option>
+                      ) : (
+                        users
+                          .filter((u) => u.id !== currentUser?.id)
+                          .map((u) => (
+                            <option key={u.id} value={u.id}>
+                              @{u.username} ({u.displayName || u.username})
+                            </option>
+                          ))
+                      )}
                     </select>
                   </div>
                   <div>
@@ -2456,9 +2530,19 @@ export default function App() {
                 {socialNotes.length > 0 && (
                   <div className="pt-2 space-y-2">
                     {socialNotes.slice(0, 2).map((note) => {
-                      const fromU = users.find((u) => u.id === note.fromUserId) || users[0];
-                      const toU = users.find((u) => u.id === note.toUserId) || users[1];
-                      const noteBook = books.find((b) => b.id === note.bookId) || books[0];
+                      const fromU =
+                        users.find((u) => u.id === note.fromUserId || u._id === note.fromUserId) ||
+                        users[0] ||
+                        { username: 'reader', displayName: 'Reader' };
+                      const toU =
+                        users.find((u) => u.id === note.toUserId || u._id === note.toUserId) ||
+                        users[1] ||
+                        users[0] ||
+                        { username: 'reader', displayName: 'Reader' };
+                      const noteBook =
+                        books.find((b) => b.id === note.bookId || b._id === note.bookId) ||
+                        books[0] ||
+                        { id: '', title: 'Book' };
                       return (
                         <div
                           key={note.id}
@@ -2466,15 +2550,21 @@ export default function App() {
                         >
                           <div className="space-y-1">
                             <p className="text-amber-200">
-                              <strong>@{fromU.username}</strong> recommended{' '}
-                              <button
-                                type="button"
-                                onClick={() => setSelectedBookId(noteBook.id)}
-                                className="underline decoration-amber-400/60 font-semibold text-white hover:text-amber-300"
-                              >
-                                {noteBook.title}
-                              </button>{' '}
-                              to <strong>@{toU.username}</strong>
+                              <strong>@{fromU?.username || 'reader'}</strong> recommended{' '}
+                              {noteBook?.id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedBookId(noteBook.id)}
+                                  className="underline decoration-amber-400/60 font-semibold text-white hover:text-amber-300"
+                                >
+                                  {noteBook.title}
+                                </button>
+                              ) : (
+                                <span className="font-semibold text-white">
+                                  {noteBook?.title || 'Book'}
+                                </span>
+                              )}{' '}
+                              to <strong>@{toU?.username || 'reader'}</strong>
                             </p>
                             <p className="text-slate-300 italic">“{note.message}”</p>
                           </div>
@@ -2510,7 +2600,7 @@ export default function App() {
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    Following ({currentUser ? currentUser.following.length : 0})
+                    Following ({currentUser?.following?.length || 0})
                   </button>
                   <button
                     type="button"
@@ -2543,8 +2633,14 @@ export default function App() {
               ) : (
                 <div className="space-y-4">
                   {socialFeedItems.map((item) => {
-                    const authorUser = users.find((u) => u.id === item.userId) || users[0];
-                    const book = books.find((b) => b.id === item.bookId) || books[0];
+                    const authorUser =
+                      users.find((u) => u.id === item.userId || u._id === item.userId) ||
+                      users[0] ||
+                      { displayName: 'Reader', username: 'reader', readingRitual: 'Reading quietly ☕' };
+                    const book =
+                      books.find((b) => b.id === item.bookId || b._id === item.bookId) ||
+                      books[0] ||
+                      { id: '', title: 'Book', author: 'Author' };
 
                     return (
                       <div
@@ -2555,7 +2651,7 @@ export default function App() {
                           <div className="flex items-center gap-3">
                             <button
                               type="button"
-                              onClick={() => setInspectedUserId(authorUser.id)}
+                              onClick={() => authorUser?.id && setInspectedUserId(authorUser.id)}
                               className="focus:outline-none"
                             >
                               <HumanAvatar user={authorUser} size="sm" />
@@ -2564,17 +2660,17 @@ export default function App() {
                               <p className="text-xs text-slate-200">
                                 <button
                                   type="button"
-                                  onClick={() => setInspectedUserId(authorUser.id)}
+                                  onClick={() => authorUser?.id && setInspectedUserId(authorUser.id)}
                                   className="font-bold text-white hover:text-amber-300"
                                 >
-                                  {authorUser.displayName} (@{authorUser.username})
+                                  {authorUser?.displayName || 'Reader'} (@{authorUser?.username || 'reader'})
                                 </button>{' '}
                                 {item.type === 'review'
                                   ? 'wrote a 5-star review'
                                   : 'logged a book in their Reading Diary'}
                               </p>
                               <p className="text-[10px] text-slate-400">
-                                {item.date} • {authorUser.readingRitual}
+                                {item.date} • {authorUser?.readingRitual || 'Reading quietly ☕'}
                               </p>
                             </div>
                           </div>
@@ -2592,7 +2688,7 @@ export default function App() {
 
                         <div className="flex gap-4 pt-1">
                           <div
-                            onClick={() => setSelectedBookId(book.id)}
+                            onClick={() => (book?.id || book?._id) && setSelectedBookId(book.id || book._id)}
                             className="cursor-pointer shrink-0"
                           >
                             <FuturisticBookCover book={book} size="sm" is3D={enable3DBooks} />
@@ -2600,12 +2696,12 @@ export default function App() {
                           <div className="space-y-2 flex-1">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                               <h4
-                                onClick={() => setSelectedBookId(book.id)}
+                                onClick={() => (book?.id || book?._id) && setSelectedBookId(book.id || book._id)}
                                 className="text-sm font-serif font-bold text-white hover:text-amber-200 cursor-pointer"
                               >
-                                {book.title}{' '}
+                                {book?.title || 'Book'}{' '}
                                 <span className="text-xs font-sans font-normal text-slate-400">
-                                  by {book.author}
+                                  by {book?.author || 'Unknown'}
                                 </span>
                               </h4>
                               <StarRating value={item.rating || 5} size={13} readOnly />
@@ -2651,7 +2747,9 @@ export default function App() {
                             <div className="pt-2 space-y-2 border-t border-white/[0.06]">
                               {(item.comments || []).map((cmt) => {
                                 const cUser =
-                                  users.find((u) => u.id === cmt.userId) || users[0];
+                                  users.find((u) => u.id === cmt.userId || u._id === cmt.userId) ||
+                                  users[0] ||
+                                  { username: 'reader' };
                                 return (
                                   <div
                                     key={cmt.id}
@@ -2660,7 +2758,7 @@ export default function App() {
                                     <HumanAvatar user={cUser} size="xs" />
                                     <div className="flex-1">
                                       <span className="font-semibold text-amber-200">
-                                        @{cUser.username}:
+                                        @{cUser?.username || 'reader'}:
                                       </span>{' '}
                                       <span className="text-slate-300">{cmt.text}</span>
                                     </div>
@@ -2678,7 +2776,7 @@ export default function App() {
                                       [item.rawId]: e.target.value
                                     }))
                                   }
-                                  placeholder={`Reply to @${authorUser.username}’s thoughts...`}
+                                  placeholder={`Reply to @${authorUser?.username || 'reader'}’s thoughts...`}
                                   className="flex-1 rounded-xl bg-slate-950/70 border border-white/10 px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
                                 />
                                 <button
@@ -2739,23 +2837,23 @@ export default function App() {
                 {[
                   {
                     id: 'favorites',
-                    label: `Favorites (${currentUser?.favorites.length || 0})`,
+                    label: `Favorites (${(currentUser?.favorites || []).length})`,
                     icon: Heart
                   },
                   {
                     id: 'liked',
-                    label: `Liked (${currentUser?.likedBooks.length || 0})`,
+                    label: `Liked (${(currentUser?.likedBooks || []).length})`,
                     icon: ThumbsUp
                   },
                   {
                     id: 'disliked',
-                    label: `Disliked (${currentUser?.dislikedBooks.length || 0})`,
+                    label: `Disliked (${(currentUser?.dislikedBooks || []).length})`,
                     icon: ThumbsDown
                   },
                   {
                     id: 'reviews',
                     label: `My Reviews (${
-                      reviews.filter((r) => r.userId === currentUser?.id).length
+                      reviews.filter((r) => r.userId === currentUser?.id || r.userId === currentUser?._id).length
                     })`,
                     icon: Star
                   }
@@ -2789,7 +2887,7 @@ export default function App() {
                       : vaultTab === 'liked'
                       ? currentUser?.likedBooks || []
                       : currentUser?.dislikedBooks || [];
-                  const shelfBooks = books.filter((b) => listIds.includes(b.id));
+                  const shelfBooks = books.filter((b) => listIds.includes(b.id || b._id));
                   if (shelfBooks.length === 0) {
                     return (
                       <div className="col-span-full p-10 rounded-2xl border border-white/10 bg-white/[0.02] text-center space-y-2">
@@ -2808,8 +2906,8 @@ export default function App() {
                   }
                   return shelfBooks.map((book) => (
                     <div
-                      key={book.id}
-                      onClick={() => setSelectedBookId(book.id)}
+                      key={book.id || book._id}
+                      onClick={() => setSelectedBookId(book.id || book._id)}
                       className="flex items-center gap-4 p-4 rounded-2xl bg-[#131020]/90 border border-white/10 hover:border-amber-400/40 cursor-pointer transition-all"
                     >
                       <FuturisticBookCover book={book} size="sm" is3D={enable3DBooks} />
@@ -2830,12 +2928,12 @@ export default function App() {
             ) : (
               <div className="space-y-4">
                 {reviews
-                  .filter((r) => r.userId === currentUser?.id)
+                  .filter((r) => r.userId === currentUser?.id || r.userId === currentUser?._id)
                   .map((r) => {
-                    const book = books.find((b) => b.id === r.bookId) || books[0];
+                    const book = books.find((b) => b.id === r.bookId || b._id === r.bookId) || books[0];
                     return (
                       <div
-                        key={r.id}
+                        key={r.id || r._id}
                         className="p-5 rounded-2xl bg-[#131020]/90 border border-white/10 flex flex-col sm:flex-row gap-4 justify-between"
                       >
                         <div className="flex gap-4">
@@ -2843,7 +2941,7 @@ export default function App() {
                           <div className="space-y-1.5">
                             <div className="flex items-center gap-2">
                               <h4
-                                onClick={() => setSelectedBookId(book.id)}
+                                onClick={() => setSelectedBookId(book.id || book._id)}
                                 className="text-sm font-bold text-white hover:text-amber-300 cursor-pointer"
                               >
                                 {book.title}
