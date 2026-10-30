@@ -333,14 +333,17 @@ export default function App() {
   // Synchronize atmosphere background on <html> and <body>
   useEffect(() => {
     const bgMap = {
-      cozy: '#1F140C',
-      velvet: '#180D2C',
-      starlight: '#0A1C36'
+      cozy: '#140F0A',
+      velvet: '#0E0A1A',
+      starlight: '#07131F'
     };
-    const chosen = bgMap[ambienceMood] || '#1F140C';
+    const chosen = bgMap[ambienceMood] || '#140F0A';
     document.body.style.backgroundColor = chosen;
     document.documentElement.style.backgroundColor = chosen;
     document.documentElement.setAttribute('data-ambience', ambienceMood);
+    try {
+      localStorage.setItem('aether_ambience_mood', ambienceMood);
+    } catch (e) {}
   }, [ambienceMood]);
 
   // Catalog Search & Filtering State
@@ -364,9 +367,23 @@ export default function App() {
 
   // Interactive Social Comments & Book Club Notes State
   const [commentInputs, setCommentInputs] = useState({});
+  const [readerSearchQuery, setReaderSearchQuery] = useState('');
   const [noteTargetUserId, setNoteTargetUserId] = useState('usr-3');
   const [noteBookId, setNoteBookId] = useState('bk-2');
   const [noteMessage, setNoteMessage] = useState('');
+
+  // Reader Directory Filter (Username / Display Name Search)
+  const filteredReaders = useMemo(() => {
+    const q = (readerSearchQuery || '').trim().toLowerCase().replace(/^@/, '');
+    const validUsers = (users || []).filter(Boolean);
+    if (!q) return validUsers;
+    return validUsers.filter((u) => {
+      const uName = (u.username || '').toLowerCase();
+      const dName = (u.displayName || '').toLowerCase();
+      const bio = (u.bio || '').toLowerCase();
+      return uName.includes(q) || dName.includes(q) || bio.includes(q);
+    });
+  }, [users, readerSearchQuery]);
 
   // Keep recommendation note targets synced with available users/books
   useEffect(() => {
@@ -802,86 +819,129 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // Handlers: Submit 5-Star Review + Optional Reading Diary Entry
   // ---------------------------------------------------------------------------
-  const handleSubmitReview = async (e) => {
-    e.preventDefault();
+  const handleSubmitReview = async (payloadOrEvent) => {
+    if (payloadOrEvent && typeof payloadOrEvent.preventDefault === 'function') {
+      payloadOrEvent.preventDefault();
+    }
     if (!currentUser) {
       setShowAuthModal(true);
       notify('Please log in to publish a 5-star review.', 'info');
-      return;
-    }
-    if (!selectedBook) return;
-    if (!reviewThoughts.trim()) {
-      notify('Share your thoughts on the book before publishing.', 'error');
-      return;
+      throw new Error('Please log in to publish a review.');
     }
 
+    const payload =
+      payloadOrEvent &&
+      typeof payloadOrEvent === 'object' &&
+      typeof payloadOrEvent.preventDefault !== 'function'
+        ? payloadOrEvent
+        : {};
+
+    const targetBookId =
+      payload.bookId || selectedBookId || selectedBook?.id || selectedBook?._id;
+    const currentBook =
+      books.find((b) => b.id === targetBookId || b._id === targetBookId) || selectedBook;
+
+    const targetThoughts = (
+      payload.thoughts !== undefined
+        ? payload.thoughts
+        : payload.text !== undefined
+        ? payload.text
+        : reviewThoughts || ''
+    ).trim();
+
+    const targetRating = Number(
+      payload.rating !== undefined ? payload.rating : reviewRating || 5
+    );
+    const targetMoods = Array.isArray(payload.moodTags) ? payload.moodTags : reviewMoods || [];
+    const targetSpoilers = Boolean(
+      payload.containsSpoilers !== undefined ? payload.containsSpoilers : reviewSpoilers
+    );
+
+    if (!targetThoughts) {
+      notify('Share your thoughts on the book before publishing.', 'error');
+      throw new Error('Please write your review thoughts before publishing.');
+    }
+
+    const cId = currentUser.id || currentUser._id;
     const newRev = {
       id: `rev-${Date.now()}`,
-      bookId: selectedBook.id,
-      userId: currentUser.id,
-      rating: reviewRating,
-      thoughts: reviewThoughts.trim(),
-      moodTags: reviewMoods,
-      containsSpoilers: reviewSpoilers,
+      bookId: targetBookId,
+      book: currentBook?._id || currentBook?.id || targetBookId,
+      userId: cId,
+      user: currentUser,
+      rating: targetRating,
+      thoughts: targetThoughts,
+      text: targetThoughts,
+      moodTags: targetMoods,
+      containsSpoilers: targetSpoilers,
       likes: [],
       dislikes: [],
       reactions: { insightful: 1, moved: 1, fire: 1, cozy: 1 },
       comments: [],
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     setReviews((prev) => [newRev, ...prev]);
 
     // Persist review to MongoDB
-    api.createReview({
-      bookId: selectedBook._id || selectedBook.id,
-      rating: reviewRating,
-      thoughts: reviewThoughts.trim(),
-      moodTags: reviewMoods,
-      containsSpoilers: reviewSpoilers,
-    }).then((savedReview) => {
-      if (savedReview && savedReview._id) {
+    try {
+      const savedReview = await api.createReview({
+        bookId: currentBook?._id || currentBook?.id || targetBookId,
+        rating: targetRating,
+        text: targetThoughts,
+        thoughts: targetThoughts,
+        moodTags: targetMoods,
+        containsSpoilers: targetSpoilers,
+      });
+      if (savedReview && (savedReview._id || savedReview.id)) {
+        const savedId = String(savedReview._id || savedReview.id);
         setReviews((prev) =>
-          prev.map((r) => (r.id === newRev.id ? { ...r, id: String(savedReview._id), _id: savedReview._id } : r))
+          prev.map((r) =>
+            r.id === newRev.id
+              ? { ...r, ...savedReview, id: savedId, _id: savedReview._id || savedId }
+              : r
+          )
         );
       }
-    }).catch((err) => console.warn('MongoDB review notice:', err.message));
+    } catch (err) {
+      console.warn('MongoDB review notice:', err.message);
+    }
 
-    if (alsoLogDiary) {
+    if (alsoLogDiary && currentBook) {
       const newDiary = {
         id: `dry-${Date.now()}`,
-        userId: currentUser.id,
-        bookId: selectedBook.id,
+        userId: cId,
+        bookId: currentBook.id || currentBook._id,
         status: 'read',
         readDate: new Date().toISOString().slice(0, 10),
-        rating: reviewRating,
-        diaryNotes: reviewThoughts.trim(),
-        pagesRead: selectedBook.pageCount || 320,
+        rating: targetRating,
+        diaryNotes: targetThoughts,
+        pagesRead: currentBook.pageCount || 320,
         isReread: false,
-        liked: (currentUser.likedBooks || []).includes(selectedBook.id || selectedBook._id),
-        addedToFavorites: (currentUser.favorites || []).includes(selectedBook.id || selectedBook._id),
-        comments: []
+        liked: (currentUser.likedBooks || []).includes(currentBook.id || currentBook._id),
+        addedToFavorites: (currentUser.favorites || []).includes(currentBook.id || currentBook._id),
+        comments: [],
       };
       setDiaryEntries((prev) => [newDiary, ...prev]);
 
       api.createDiaryEntry({
-        bookId: selectedBook._id || selectedBook.id,
+        bookId: currentBook._id || currentBook.id,
         status: 'read',
         readDate: new Date(),
-        rating: reviewRating,
-        diaryNotes: reviewThoughts.trim(),
-        pagesRead: selectedBook.pageCount || 320,
+        rating: targetRating,
+        diaryNotes: targetThoughts,
+        pagesRead: currentBook.pageCount || 320,
         isReread: false,
-        liked: (currentUser.likedBooks || []).includes(selectedBook.id || selectedBook._id),
-        addedToFavorites: (currentUser.favorites || []).includes(selectedBook.id || selectedBook._id),
+        liked: (currentUser.likedBooks || []).includes(currentBook.id || currentBook._id),
+        addedToFavorites: (currentUser.favorites || []).includes(currentBook.id || currentBook._id),
       }).catch((err) => console.warn('MongoDB diary notice:', err.message));
     }
 
     setReviewThoughts('');
     notify(
       alsoLogDiary
-        ? `Published ${reviewRating}★ review & logged "${selectedBook.title}" to your Reading Diary!`
-        : `Published ${reviewRating}★ review for "${selectedBook.title}"!`,
+        ? `Published ${targetRating}★ review & logged "${currentBook?.title || 'Book'}" to your Reading Diary!`
+        : `Published ${targetRating}★ review for "${currentBook?.title || 'Book'}"!`,
       'success'
     );
   };
@@ -897,7 +957,7 @@ export default function App() {
     }
     setReviews((prev) =>
       prev.map((r) => {
-        if (r.id !== reviewId && r._id !== reviewId) return r;
+        if (r.id !== reviewId && r._id !== reviewId && String(r._id) !== String(reviewId)) return r;
         const rLikes = r.likes || [];
         const rDislikes = r.dislikes || [];
         const hasLiked = rLikes.includes(cId);
@@ -934,25 +994,28 @@ export default function App() {
   };
 
   // Add a human comment to a Review or Diary Entry
-  const handleAddComment = (targetId, isDiary = false) => {
+  const handleAddCommentDirect = (targetId, text, isDiary = false) => {
     if (!currentUser) {
       setShowAuthModal(true);
+      notify('Please log in to leave a comment or reply.', 'info');
       return;
     }
-    const text = (commentInputs[targetId] || '').trim();
-    if (!text) return;
+    const cleanText = (text || '').trim();
+    if (!cleanText) return;
 
+    const cId = currentUser.id || currentUser._id;
     const newComment = {
       id: `cmt-${Date.now()}`,
-      userId: currentUser.id,
-      text,
-      createdAt: 'Just now'
+      userId: cId,
+      user: currentUser,
+      text: cleanText,
+      createdAt: 'Just now',
     };
 
     if (isDiary) {
       setDiaryEntries((prev) =>
         prev.map((d) =>
-          d.id === targetId
+          (d.id === targetId || d._id === targetId || String(d._id) === String(targetId) || String(d.id) === String(targetId))
             ? { ...d, comments: [...(d.comments || []), newComment] }
             : d
         )
@@ -960,15 +1023,20 @@ export default function App() {
     } else {
       setReviews((prev) =>
         prev.map((r) =>
-          r.id === targetId
+          (r.id === targetId || r._id === targetId || String(r._id) === String(targetId) || String(r.id) === String(targetId))
             ? { ...r, comments: [...(r.comments || []), newComment] }
             : r
         )
       );
     }
 
-    setCommentInputs((prev) => ({ ...prev, [targetId]: '' }));
     notify('Shared your reply with the reading community!', 'success');
+  };
+
+  const handleAddComment = (targetId, isDiary = false) => {
+    const text = commentInputs[targetId] || '';
+    handleAddCommentDirect(targetId, text, isDiary);
+    setCommentInputs((prev) => ({ ...prev, [targetId]: '' }));
   };
 
   // Send a Book Club Note / Recommendation to another reader
@@ -1259,43 +1327,50 @@ export default function App() {
   };
 
   const socialFeedItems = useMemo(() => {
+    const validUsers = (users || []).filter(Boolean);
     const allowedUserIds =
       socialScope === 'following' && currentUser
-        ? (currentUser.following || [])
-        : users.map((u) => u.id || u._id);
+        ? (currentUser.following || []).map(String)
+        : validUsers.map((u) => String(u.id || u._id));
 
-    const revItems = reviews
-      .filter((r) => (allowedUserIds || []).includes(r.userId))
+    const revItems = (reviews || [])
+      .filter((r) => {
+        const uid = String(r.userId || r.user?._id || r.user?.id || r.user || '');
+        return allowedUserIds.includes(uid);
+      })
       .map((r) => ({
         type: 'review',
         id: `feed-rev-${r.id || r._id}`,
         rawId: r.id || r._id,
         date: (r.createdAt || '').slice(0, 10),
-        userId: r.userId,
-        bookId: r.bookId,
+        userId: r.userId || r.user?._id || r.user?.id || r.user,
+        bookId: r.bookId || r.book?._id || r.book?.id || r.book,
         rating: r.rating,
-        text: r.thoughts,
+        text: r.thoughts || r.text || '',
         moodTags: r.moodTags || [],
         comments: r.comments || [],
         reactions: r.reactions || { insightful: 4, moved: 6, fire: 5, cozy: 3 },
-        reviewObj: r
+        reviewObj: r,
       }));
 
-    const diaryItems = diaryEntries
-      .filter((d) => (allowedUserIds || []).includes(d.userId))
+    const diaryItems = (diaryEntries || [])
+      .filter((d) => {
+        const uid = String(d.userId || d.user?._id || d.user?.id || d.user || '');
+        return allowedUserIds.includes(uid);
+      })
       .map((d) => ({
         type: 'diary',
         id: `feed-dry-${d.id || d._id}`,
         rawId: d.id || d._id,
         date: d.readDate || '',
-        userId: d.userId,
-        bookId: d.bookId,
+        userId: d.userId || d.user?._id || d.user?.id || d.user,
+        bookId: d.bookId || d.book?._id || d.book?.id || d.book,
         rating: d.rating,
-        text: d.diaryNotes,
+        text: d.diaryNotes || d.notes || '',
         status: d.status,
         isReread: d.isReread,
         pagesRead: d.pagesRead,
-        comments: d.comments || []
+        comments: d.comments || [],
       }));
 
     return [...revItems, ...diaryItems].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -1327,10 +1402,10 @@ export default function App() {
 
   const themeBg =
     ambienceMood === 'cozy'
-      ? 'bg-[#1F140C]'
+      ? 'bg-[#140F0A]'
       : ambienceMood === 'velvet'
-      ? 'bg-[#180D2C]'
-      : 'bg-[#0A1C36]';
+      ? 'bg-[#0E0A1A]'
+      : 'bg-[#07131F]';
 
 
   // ---------------------------------------------------------------------------
@@ -1702,11 +1777,11 @@ export default function App() {
                             try {
                               localStorage.setItem('aether_ambience_mood', m.id);
                               const bgMap = {
-                                cozy: '#1F140C',
-                                velvet: '#180D2C',
-                                starlight: '#0A1C36'
+                                cozy: '#140F0A',
+                                velvet: '#0E0A1A',
+                                starlight: '#07131F'
                               };
-                              const c = bgMap[m.id] || '#1F140C';
+                              const c = bgMap[m.id] || '#140F0A';
                               document.body.style.backgroundColor = c;
                               document.documentElement.style.backgroundColor = c;
                             } catch (e) {}
@@ -2267,88 +2342,137 @@ export default function App() {
                     </p>
                   </div>
                   <span className="text-xs font-mono text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-400/20">
-                    {users.length} Readers
+                    {filteredReaders.length} {filteredReaders.length === 1 ? 'Reader' : 'Readers'}
                   </span>
                 </div>
 
-                <div className="space-y-3">
-                  {users.map((reader) => {
-                    const isMe = (currentUser?.id === reader.id || currentUser?._id === reader.id);
-                    const isFollowing = (currentUser?.following || []).includes(reader.id || reader._id);
-                    const isInspected = (inspectedUser?.id === reader.id || inspectedUser?._id === reader.id);
-                    const readerDiaryCount = diaryEntries.filter(
-                      (d) => (d.userId === reader.id || d.userId === reader._id) && d.status === 'read'
-                    ).length;
+                {/* Search for Readers by @username or Display Name */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={readerSearchQuery}
+                    onChange={(e) => setReaderSearchQuery(e.target.value)}
+                    placeholder="Search readers by @username, name, or bio..."
+                    className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950/80 border border-white/10 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-400/60 transition-colors"
+                  />
+                  {readerSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setReaderSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
 
-                    return (
-                      <div
-                        key={reader.id || reader._id}
-                        onClick={() => setInspectedUserId(reader.id || reader._id)}
-                        className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-                          isInspected
-                            ? 'bg-amber-500/10 border-amber-400/50 shadow-[0_0_25px_rgba(245,158,11,0.12)]'
-                            : 'bg-white/[0.02] border-white/[0.07] hover:border-white/20'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <HumanAvatar user={reader} size="md" />
-                            <div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-sm font-bold text-white">
-                                  {reader.displayName || reader.username}
-                                </span>
-                                {isMe && (
-                                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                                    YOU
+                <div className="space-y-3">
+                  {filteredReaders.length === 0 ? (
+                    <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-1.5">
+                      <p className="text-xs text-slate-300 font-semibold">No readers found</p>
+                      <p className="text-[11px] text-slate-500">
+                        No fellow reader matching "{readerSearchQuery}". Try another username or clear the search.
+                      </p>
+                    </div>
+                  ) : (
+                    filteredReaders.map((reader) => {
+                      if (!reader) return null;
+                      const isMe = Boolean(
+                        currentUser &&
+                          (currentUser.id === reader.id ||
+                            currentUser._id === reader.id ||
+                            currentUser.id === reader._id ||
+                            currentUser._id === reader._id)
+                      );
+                      const isFollowing = (currentUser?.following || []).some(
+                        (fId) => String(fId) === String(reader.id || reader._id)
+                      );
+                      const isInspected = Boolean(
+                        inspectedUser &&
+                          (inspectedUser.id === reader.id ||
+                            inspectedUser._id === reader.id ||
+                            inspectedUser.id === reader._id ||
+                            inspectedUser._id === reader._id)
+                      );
+                      const readerDiaryCount = diaryEntries.filter(
+                        (d) =>
+                          String(d.userId) === String(reader.id || reader._id) &&
+                          d.status === 'read'
+                      ).length;
+
+                      return (
+                        <div
+                          key={reader.id || reader._id}
+                          onClick={() => setInspectedUserId(reader.id || reader._id)}
+                          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+                            isInspected
+                              ? 'bg-amber-500/10 border-amber-400/50 shadow-[0_0_25px_rgba(245,158,11,0.12)]'
+                              : 'bg-white/[0.02] border-white/[0.07] hover:border-white/20'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <HumanAvatar user={reader} size="md" />
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm font-bold text-white">
+                                    {reader.displayName || reader.username || 'Reader'}
                                   </span>
-                                )}
+                                  {isMe && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                                      YOU
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-400">@{reader.username || 'reader'}</p>
+                                <p className="text-[11px] text-amber-200/80 mt-0.5">
+                                  {reader.readingRitual || 'Reading with warm tea ☕'}
+                                </p>
                               </div>
-                              <p className="text-xs text-slate-400">@{reader.username || 'reader'}</p>
-                              <p className="text-[11px] text-amber-200/80 mt-0.5">
-                                {reader.readingRitual || 'Reading with warm tea ☕'}
-                              </p>
                             </div>
+
+                            {!isMe && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleFollow(reader.id || reader._id);
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                                  isFollowing
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                                    : 'bg-amber-400 text-slate-950 hover:bg-amber-300'
+                                }`}
+                              >
+                                {isFollowing ? 'Following ✓' : '+ Follow'}
+                              </button>
+                            )}
                           </div>
 
-                          {!isMe && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleFollow(reader.id || reader._id);
-                              }}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                                isFollowing
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                                  : 'bg-amber-400 text-slate-950 hover:bg-amber-300'
-                              }`}
-                            >
-                              {isFollowing ? 'Following ✓' : '+ Follow'}
-                            </button>
-                          )}
-                        </div>
+                          <p className="text-xs text-slate-300/90 mt-2.5 line-clamp-2">
+                            {reader.bio || 'Book lover exploring stories.'}
+                          </p>
 
-                        <p className="text-xs text-slate-300/90 mt-2.5 line-clamp-2">{reader.bio || 'Book lover exploring stories.'}</p>
-
-                        <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-white/[0.06] text-[11px] text-slate-400">
-                          <span>
-                            <strong className="text-white">{(reader.favorites || []).length}</strong> Favs
-                          </span>
-                          <span>
-                            <strong className="text-white">{(reader.likedBooks || []).length}</strong> Likes
-                          </span>
-                          <span>
-                            <strong className="text-white">{readerDiaryCount}</strong> Read in Diary
-                          </span>
-                          <span>
-                            <strong className="text-white">{(reader.followers || []).length}</strong>{' '}
-                            Followers
-                          </span>
+                          <div className="flex items-center gap-4 mt-3 pt-2.5 border-t border-white/[0.06] text-[11px] text-slate-400">
+                            <span>
+                              <strong className="text-white">{(reader.favorites || []).length}</strong> Favs
+                            </span>
+                            <span>
+                              <strong className="text-white">{(reader.likedBooks || []).length}</strong> Likes
+                            </span>
+                            <span>
+                              <strong className="text-white">{readerDiaryCount}</strong> Read in Diary
+                            </span>
+                            <span>
+                              <strong className="text-white">{(reader.followers || []).length}</strong> Followers
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
@@ -2423,15 +2547,15 @@ export default function App() {
                     </p>
                     <div className="space-y-2">
                       {diaryEntries
-                        .filter((d) => d.userId === inspectedUser.id)
+                        .filter((d) => inspectedUser && (d.userId === inspectedUser.id || d.userId === inspectedUser._id))
                         .slice(0, 3)
                         .map((d) => {
-                          const b = books.find((item) => item.id === d.bookId);
+                          const b = books.find((item) => item.id === d.bookId || item._id === d.bookId);
                           if (!b) return null;
                           return (
                             <div
-                              key={d.id}
-                              onClick={() => setSelectedBookId(b.id)}
+                              key={d.id || d._id}
+                              onClick={() => setSelectedBookId(b.id || b._id)}
                               className="p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 cursor-pointer flex items-center justify-between gap-2"
                             >
                               <div className="min-w-0">
@@ -2478,14 +2602,14 @@ export default function App() {
                       onChange={(e) => setNoteTargetUserId(e.target.value)}
                       className="w-full rounded-xl bg-slate-950/90 border border-white/15 px-3 py-1.5 text-xs text-white"
                     >
-                      {users.filter((u) => u.id !== currentUser?.id).length === 0 ? (
+                      {(users || []).filter((u) => u && (u.id !== currentUser?.id && u._id !== currentUser?._id)).length === 0 ? (
                         <option value="">No other readers registered yet</option>
                       ) : (
-                        users
-                          .filter((u) => u.id !== currentUser?.id)
+                        (users || [])
+                          .filter((u) => u && (u.id !== currentUser?.id && u._id !== currentUser?._id))
                           .map((u) => (
-                            <option key={u.id} value={u.id}>
-                              @{u.username} ({u.displayName || u.username})
+                            <option key={u.id || u._id} value={u.id || u._id}>
+                              @{u.username || 'reader'} ({u.displayName || u.username || 'Reader'})
                             </option>
                           ))
                       )}
@@ -2634,8 +2758,9 @@ export default function App() {
                 <div className="space-y-4">
                   {socialFeedItems.map((item) => {
                     const authorUser =
-                      users.find((u) => u.id === item.userId || u._id === item.userId) ||
-                      users[0] ||
+                      (users || []).find((u) => u && (u.id === item.userId || u._id === item.userId || String(u._id) === String(item.userId))) ||
+                      (currentUser && (currentUser.id === item.userId || currentUser._id === item.userId) ? currentUser : null) ||
+                      (users && users[0]) ||
                       { displayName: 'Reader', username: 'reader', readingRitual: 'Reading quietly ☕' };
                     const book =
                       books.find((b) => b.id === item.bookId || b._id === item.bookId) ||
@@ -2747,9 +2872,11 @@ export default function App() {
                             <div className="pt-2 space-y-2 border-t border-white/[0.06]">
                               {(item.comments || []).map((cmt) => {
                                 const cUser =
-                                  users.find((u) => u.id === cmt.userId || u._id === cmt.userId) ||
-                                  users[0] ||
-                                  { username: 'reader' };
+                                  (users || []).find((u) => u && (u.id === cmt.userId || u._id === cmt.userId || String(u._id) === String(cmt.userId))) ||
+                                  cmt.user ||
+                                  (currentUser && (currentUser.id === cmt.userId || currentUser._id === cmt.userId) ? currentUser : null) ||
+                                  (users && users[0]) ||
+                                  { username: 'reader', displayName: 'Reader' };
                                 return (
                                   <div
                                     key={cmt.id}
@@ -2776,15 +2903,21 @@ export default function App() {
                                       [item.rawId]: e.target.value
                                     }))
                                   }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddComment(item.rawId, item.type === 'diary');
+                                    }
+                                  }}
                                   placeholder={`Reply to @${authorUser?.username || 'reader'}’s thoughts...`}
-                                  className="flex-1 rounded-xl bg-slate-950/70 border border-white/10 px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                                  className="flex-1 rounded-xl bg-slate-950/70 border border-white/10 px-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-400/50"
                                 />
                                 <button
                                   type="button"
                                   onClick={() =>
                                     handleAddComment(item.rawId, item.type === 'diary')
                                   }
-                                  className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold"
+                                  className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold transition-all"
                                 >
                                   Reply
                                 </button>
@@ -3218,6 +3351,7 @@ export default function App() {
         onUpdateReview={handleUpdateReview}
         onDeleteReview={handleDeleteReview}
         onReviewReaction={handleReviewReaction}
+        onAddComment={(reviewId, text) => handleAddCommentDirect(reviewId, text, false)}
         onRequireAuth={() => {
           setAuthMode('login');
           setShowAuthModal(true);

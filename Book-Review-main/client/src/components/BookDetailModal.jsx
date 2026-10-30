@@ -13,6 +13,7 @@ import {
   Edit3,
   Check,
   AlertCircle,
+  MessageSquare,
 } from 'lucide-react';
 import BookCover from './BookCover';
 import StarRating from './StarRating';
@@ -52,6 +53,7 @@ export default function BookDetailModal({
   onUpdateReview,
   onDeleteReview,
   onReviewReaction,
+  onAddComment,
   onRequireAuth,
 }) {
   const [reviewRating, setReviewRating] = useState(5);
@@ -62,6 +64,8 @@ export default function BookDetailModal({
   const [revealedSpoilers, setRevealedSpoilers] = useState({});
   const [reviewError, setReviewError] = useState('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [expandedComments, setExpandedComments] = useState({});
+  const [reviewCommentInputs, setReviewCommentInputs] = useState({});
 
   // Inline Review Edit state
   const [editingReviewId, setEditingReviewId] = useState(null);
@@ -92,7 +96,9 @@ export default function BookDetailModal({
   };
 
   const handleReviewSubmit = async (e) => {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     setReviewError('');
 
     if (!currentUser) {
@@ -126,6 +132,19 @@ export default function BookDetailModal({
     } catch (err) {
       setIsSubmittingReview(false);
       setReviewError(err.message || 'Failed to submit review');
+    }
+  };
+
+  const handleReviewCommentSubmit = (revId) => {
+    const text = (reviewCommentInputs[revId] || '').trim();
+    if (!text) return;
+    if (!currentUser) {
+      if (onRequireAuth) onRequireAuth();
+      return;
+    }
+    if (onAddComment) {
+      onAddComment(revId, text);
+      setReviewCommentInputs((prev) => ({ ...prev, [revId]: '' }));
     }
   };
 
@@ -604,7 +623,7 @@ export default function BookDetailModal({
                         <button
                           type="button"
                           onClick={() => onReviewReaction && onReviewReaction(revId, 'like')}
-                          className="flex items-center gap-1 text-xs text-slate-400 hover:text-emerald-300"
+                          className="flex items-center gap-1 text-xs text-slate-400 hover:text-emerald-300 transition-colors"
                         >
                           <ThumbsUp size={12} />
                           <span>{rev.likes?.length || 0}</span>
@@ -612,13 +631,100 @@ export default function BookDetailModal({
                         <button
                           type="button"
                           onClick={() => onReviewReaction && onReviewReaction(revId, 'dislike')}
-                          className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-300"
+                          className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-300 transition-colors"
                         >
                           <ThumbsDown size={12} />
                           <span>{rev.dislikes?.length || 0}</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedComments((prev) => ({
+                              ...prev,
+                              [revId]: !prev[revId],
+                            }))
+                          }
+                          className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-300 transition-colors ml-1"
+                          title="View comments or reply to reviewer"
+                        >
+                          <MessageSquare size={12} />
+                          <span>{(rev.comments || []).length > 0 ? `${rev.comments.length}` : 'Reply'}</span>
+                        </button>
                       </div>
                     </div>
+
+                    {/* Collapsible Comments / Reply Thread */}
+                    {expandedComments[revId] && (
+                      <div className="pt-2.5 mt-2 border-t border-white/[0.08] space-y-2">
+                        {(rev.comments || []).length > 0 ? (
+                          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                            {(rev.comments || []).map((cmt) => {
+                              const cUser =
+                                (users || []).find(
+                                  (u) =>
+                                    u &&
+                                    (u.id === cmt.userId ||
+                                      u._id === cmt.userId ||
+                                      String(u._id) === String(cmt.userId))
+                                ) ||
+                                (currentUser &&
+                                (currentUser.id === cmt.userId ||
+                                  currentUser._id === cmt.userId)
+                                  ? currentUser
+                                  : null) ||
+                                (users && users[0]) || {
+                                  username: 'reader',
+                                  displayName: 'Reader',
+                                };
+                              return (
+                                <div
+                                  key={cmt.id}
+                                  className="flex items-start gap-2 text-xs bg-white/[0.02] p-2 rounded-xl"
+                                >
+                                  <HumanAvatar user={cUser} size="xs" />
+                                  <div className="flex-1 min-w-0">
+                                    <span className="font-semibold text-amber-200">
+                                      @{cUser?.username || 'reader'}:
+                                    </span>{' '}
+                                    <span className="text-slate-300 break-words">{cmt.text}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-500 italic">No replies yet. Share a comment or response!</p>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            value={reviewCommentInputs[revId] || ''}
+                            onChange={(e) =>
+                              setReviewCommentInputs((prev) => ({
+                                ...prev,
+                                [revId]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleReviewCommentSubmit(revId);
+                              }
+                            }}
+                            placeholder={`Reply to @${revAuthor?.username || 'reader'}...`}
+                            className="flex-1 rounded-xl bg-slate-900 border border-white/10 px-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-400/50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleReviewCommentSubmit(revId)}
+                            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold transition-all"
+                          >
+                            Reply
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })

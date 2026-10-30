@@ -31,10 +31,10 @@ export default function Navbar({
 }) {
   const navBg =
     ambienceMood === 'cozy'
-      ? 'bg-[#1F140C]/90 border-amber-900/30'
+      ? 'bg-[#140F0A]/90 border-amber-900/30'
       : ambienceMood === 'velvet'
-      ? 'bg-[#180D2C]/90 border-purple-900/30'
-      : 'bg-[#0A1C36]/90 border-sky-900/30';
+      ? 'bg-[#0E0A1A]/90 border-purple-900/30'
+      : 'bg-[#07131F]/90 border-sky-900/30';
 
   return (
     <header className={`sticky top-0 z-30 border-b backdrop-blur-xl transition-colors duration-500 ${navBg}`}>

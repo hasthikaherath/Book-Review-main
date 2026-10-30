@@ -254,7 +254,7 @@ export default function AuthModal({
             QUICK DEMO READER SWITCHER (ONE-CLICK):
           </p>
           <div className="grid grid-cols-2 gap-2">
-            {users.slice(0, 4).map((u) => (
+            {(users || []).filter(Boolean).slice(0, 4).map((u) => (
               <button
                 key={u.id || u._id}
                 type="button"
@@ -265,7 +265,7 @@ export default function AuthModal({
                 className="flex items-center gap-2 p-2 rounded-xl border text-left text-xs bg-white/[0.03] border-white/10 text-slate-300 hover:bg-white/[0.07] transition-all"
               >
                 <HumanAvatar user={u} size="xs" />
-                <span className="truncate">@{u.username}</span>
+                <span className="truncate">@{u.username || 'reader'}</span>
               </button>
             ))}
           </div>
